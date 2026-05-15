@@ -1,5 +1,6 @@
 package com.example.aurafarm2.features.expenses
 
+import android.content.Context
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,16 +21,90 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import com.example.aurafarm2.core.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.UUID
 
-// ── Dummy data ─────────────────────────────────────────────────
+// ── Local persistence (DataStore) ────────────────────────────────
 
-data class IncomeSource(
+private val Context.incomeDataStore by preferencesDataStore(name = "income_store")
+private val INCOME_ENTRIES_KEY = stringPreferencesKey("income_entries_json")
+
+private data class IncomeEntry(
+    val id: String,
+    val source: String,
+    val tag: String,
+    val amount: Double,
+    val dateEpochDay: Long
+)
+
+private fun incomeEntriesFlow(context: Context): Flow<List<IncomeEntry>> =
+    context.incomeDataStore.data.map { prefs ->
+        val raw = prefs[INCOME_ENTRIES_KEY] ?: "[]"
+        decodeIncomeEntries(raw)
+    }
+
+private suspend fun saveIncomeEntry(context: Context, entry: IncomeEntry) {
+    context.incomeDataStore.edit { prefs ->
+        val current = decodeIncomeEntries(prefs[INCOME_ENTRIES_KEY] ?: "[]")
+        prefs[INCOME_ENTRIES_KEY] = encodeIncomeEntries(current + entry)
+    }
+}
+
+private fun encodeIncomeEntries(entries: List<IncomeEntry>): String {
+    val array = JSONArray()
+    entries.forEach { entry ->
+        val obj = JSONObject()
+        obj.put("id", entry.id)
+        obj.put("source", entry.source)
+        obj.put("tag", entry.tag)
+        obj.put("amount", entry.amount)
+        obj.put("dateEpochDay", entry.dateEpochDay)
+        array.put(obj)
+    }
+    return array.toString()
+}
+
+private fun decodeIncomeEntries(raw: String): List<IncomeEntry> {
+    return runCatching {
+        val array = JSONArray(raw)
+        buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                add(
+                    IncomeEntry(
+                        id = obj.optString("id"),
+                        source = obj.optString("source"),
+                        tag = obj.optString("tag"),
+                        amount = obj.optDouble("amount"),
+                        dateEpochDay = obj.optLong("dateEpochDay")
+                    )
+                )
+            }
+        }
+    }.getOrElse { emptyList() }
+}
+
+// ── UI models ───────────────────────────────────────────────────
+
+private data class IncomeSourceUi(
     val icon: ImageVector,
     val name: String,
     val tag: String,
@@ -37,36 +112,74 @@ data class IncomeSource(
     val tagColor: Color
 )
 
-data class IncomeCategory(
+private data class IncomeCategoryUi(
     val label: String,
     val amount: Double,
     val color: Color,
     val fraction: Float
 )
 
-private val dummyIncomeSources = listOf(
-    IncomeSource(Icons.Outlined.Work,             "Full-Time Job",    "Salary",    3500.00, EssentialDot),
-    IncomeSource(Icons.Outlined.Laptop,           "Freelance Design", "Freelance",  850.00, LuxuryDot),
-    IncomeSource(Icons.Outlined.TrendingUp,       "Stock Dividends",  "Passive",    320.00, SecondaryFixedDim),
-    IncomeSource(Icons.Outlined.CurrencyBitcoin,  "Crypto Yield",     "Passive",    180.00, ExtraDot),
-    IncomeSource(Icons.Outlined.Storefront,       "Side Store",       "Business",   350.00, LuxuryDot),
-)
-
-private val dummyIncomeCategories = listOf(
-    IncomeCategory("Salary",    3500.0, EssentialDot,      0.65f),
-    IncomeCategory("Freelance",  850.0, LuxuryDot,         0.16f),
-    IncomeCategory("Passive",    500.0, SecondaryFixedDim,  0.09f),
-    IncomeCategory("Business",   350.0, ExtraDot,           0.07f),
-)
-
-private const val TOTAL_INCOME   = 5200.00
 private const val TOTAL_EXPENSES = 1779.00
-private const val SAVINGS_RATE   = 65.8
 
 // ── Root screen ────────────────────────────────────────────────
 
 @Composable
 fun IncomeScreen(onAddClick: () -> Unit = {}) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val incomeEntries by remember {
+        incomeEntriesFlow(context)
+    }.collectAsState(initial = emptyList())
+
+    val totalIncome by remember(incomeEntries) {
+        derivedStateOf { incomeEntries.sumOf { it.amount } }
+    }
+
+    val savingsRate by remember(totalIncome) {
+        derivedStateOf {
+            if (totalIncome <= 0.0) 0.0 else ((totalIncome - TOTAL_EXPENSES) / totalIncome) * 100.0
+        }
+    }
+
+    val categories by remember(incomeEntries, totalIncome) {
+        derivedStateOf {
+            val grouped = incomeEntries.groupBy { it.tag.ifBlank { "Other" } }
+            val raw = grouped.map { (tag, list) ->
+                IncomeCategoryUi(
+                    label = tag,
+                    amount = list.sumOf { it.amount },
+                    color = colorForTag(tag),
+                    fraction = 0f
+                )
+            }
+            raw.sortedByDescending { it.amount }
+                .take(4)
+                .map { cat ->
+                    cat.copy(fraction = if (totalIncome > 0) (cat.amount / totalIncome).toFloat() else 0f)
+                }
+        }
+    }
+
+    val sources by remember(incomeEntries) {
+        derivedStateOf {
+            incomeEntries
+                .sortedByDescending { it.dateEpochDay }
+                .map { entry ->
+                    val date = LocalDate.ofEpochDay(entry.dateEpochDay)
+                    val dateText = date.format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+                    IncomeSourceUi(
+                        icon = iconForTag(entry.tag),
+                        name = entry.source,
+                        tag = "${entry.tag} • $dateText",
+                        amount = entry.amount,
+                        tagColor = colorForTag(entry.tag)
+                    )
+                }
+        }
+    }
+
+    var showAddSheet by remember { mutableStateOf(false) }
 
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
@@ -86,19 +199,24 @@ fun IncomeScreen(onAddClick: () -> Unit = {}) {
             }
 
             AnimatedIncomeSection(visible = visible, delayMs = 80) {
-                IncomeHeroSection(visible = visible)
+                IncomeHeroSection(
+                    visible = visible,
+                    totalIncome = totalIncome,
+                    totalExpenses = TOTAL_EXPENSES,
+                    savingsRate = savingsRate
+                )
             }
 
             Spacer(Modifier.height(32.dp))
 
             AnimatedIncomeSection(visible = visible, delayMs = 180) {
-                IncomeBreakdownSection(visible = visible)
+                IncomeBreakdownSection(visible = visible, categories = categories)
             }
 
             Spacer(Modifier.height(32.dp))
 
             AnimatedIncomeSection(visible = visible, delayMs = 260) {
-                IncomeSourcesSection(visible = visible)
+                IncomeSourcesSection(visible = visible, sources = sources)
             }
 
             Spacer(Modifier.height(96.dp))
@@ -106,20 +224,43 @@ fun IncomeScreen(onAddClick: () -> Unit = {}) {
 
         // FAB springs in
         val fabScale by animateFloatAsState(
-            targetValue   = if (visible) 1f else 0f,
+            targetValue = if (visible) 1f else 0f,
             animationSpec = spring(
                 dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness    = Spring.StiffnessMedium
+                stiffness = Spring.StiffnessMedium
             ),
             label = "fab_scale"
         )
 
         FloatingIncomeAddButton(
-            onClick  = onAddClick,
+            onClick = {
+                onAddClick()
+                showAddSheet = true
+            },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 24.dp)
                 .scale(fabScale)
+        )
+    }
+
+    if (showAddSheet) {
+        AddIncomeBottomSheet(
+            onDismiss = { showAddSheet = false },
+            onSave = { source, tag, amount, date ->
+                scope.launch {
+                    saveIncomeEntry(
+                        context,
+                        IncomeEntry(
+                            id = UUID.randomUUID().toString(),
+                            source = source,
+                            tag = tag,
+                            amount = amount,
+                            dateEpochDay = date.toEpochDay()
+                        )
+                    )
+                }
+            }
         )
     }
 }
@@ -133,20 +274,20 @@ private fun AnimatedIncomeSection(
     content: @Composable () -> Unit
 ) {
     val offsetY by animateFloatAsState(
-        targetValue   = if (visible) 0f else 40f,
+        targetValue = if (visible) 0f else 40f,
         animationSpec = tween(500, delayMillis = delayMs, easing = FastOutSlowInEasing),
-        label         = "income_offset"
+        label = "income_offset"
     )
     val alpha by animateFloatAsState(
-        targetValue   = if (visible) 1f else 0f,
+        targetValue = if (visible) 1f else 0f,
         animationSpec = tween(400, delayMillis = delayMs, easing = FastOutSlowInEasing),
-        label         = "income_alpha"
+        label = "income_alpha"
     )
 
     Box(
         modifier = Modifier.graphicsLayer {
             translationY = offsetY.dp.toPx()
-            this.alpha   = alpha
+            this.alpha = alpha
         }
     ) {
         content()
@@ -163,7 +304,7 @@ private fun IncomeTopBar() {
             .statusBarsPadding()
             .padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment     = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
@@ -174,24 +315,24 @@ private fun IncomeTopBar() {
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text  = "G",
+                text = "G",
                 style = MaterialTheme.typography.titleMedium,
                 color = Primary
             )
         }
 
         Text(
-            text  = "Income",
+            text = "Income",
             style = MaterialTheme.typography.headlineMedium,
             color = OnSurface
         )
 
         IconButton(onClick = {}) {
             Icon(
-                imageVector        = Icons.Outlined.Settings,
+                imageVector = Icons.Outlined.Settings,
                 contentDescription = "Settings",
-                tint               = OnSurfaceVariant,
-                modifier           = Modifier.size(22.dp)
+                tint = OnSurfaceVariant,
+                modifier = Modifier.size(22.dp)
             )
         }
     }
@@ -200,17 +341,22 @@ private fun IncomeTopBar() {
 // ── Hero section ───────────────────────────────────────────────
 
 @Composable
-private fun IncomeHeroSection(visible: Boolean) {
+private fun IncomeHeroSection(
+    visible: Boolean,
+    totalIncome: Double,
+    totalExpenses: Double,
+    savingsRate: Double
+) {
     Column(
-        modifier            = Modifier
+        modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text      = "MONTHLY INCOME",
-            style     = MaterialTheme.typography.labelLarge.copy(letterSpacing = 2.sp),
-            color     = OnSurfaceVariant,
+            text = "MONTHLY INCOME",
+            style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 2.sp),
+            color = OnSurfaceVariant,
             textAlign = TextAlign.Center
         )
 
@@ -218,27 +364,27 @@ private fun IncomeHeroSection(visible: Boolean) {
 
         // Count-up
         val animatedValue by animateFloatAsState(
-            targetValue   = if (visible) TOTAL_INCOME.toFloat() else 0f,
+            targetValue = if (visible) totalIncome.toFloat() else 0f,
             animationSpec = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
-            label         = "income_count_up"
+            label = "income_count_up"
         )
         Text(
-            text      = "$${"%.2f".format(animatedValue)}",
-            style     = MaterialTheme.typography.displayLarge,
-            color     = OnSurface,
+            text = "$${"%.2f".format(animatedValue)}",
+            style = MaterialTheme.typography.displayLarge,
+            color = OnSurface,
             textAlign = TextAlign.Center
         )
 
         Spacer(Modifier.height(20.dp))
 
         SavedSpentPill(
-            saved = TOTAL_INCOME - TOTAL_EXPENSES,
-            spent = TOTAL_EXPENSES
+            saved = totalIncome - totalExpenses,
+            spent = totalExpenses
         )
 
         Spacer(Modifier.height(16.dp))
 
-        SavingsRateChip(rate = SAVINGS_RATE)
+        SavingsRateChip(rate = savingsRate)
     }
 }
 
@@ -251,15 +397,15 @@ private fun SavedSpentPill(saved: Double, spent: Double) {
             .border(1.dp, OutlineVariant, RoundedCornerShape(100.dp))
             .padding(horizontal = 20.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment     = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
-            verticalAlignment     = Alignment.CenterVertically,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Box(Modifier.size(8.dp).background(IncomeGreen, CircleShape))
             Text(
-                text  = "+$${"%.0f".format(saved)} Saved",
+                text = "+$${"%.0f".format(saved)} Saved",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurface
             )
@@ -268,12 +414,12 @@ private fun SavedSpentPill(saved: Double, spent: Double) {
         Box(Modifier.width(1.dp).height(16.dp).background(OutlineVariant))
 
         Row(
-            verticalAlignment     = Alignment.CenterVertically,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Box(Modifier.size(8.dp).background(ExpenseRed, CircleShape))
             Text(
-                text  = "-$${"%.0f".format(spent)} Spent",
+                text = "-$${"%.0f".format(spent)} Spent",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurface
             )
@@ -290,16 +436,16 @@ private fun SavingsRateChip(rate: Double) {
             .border(1.dp, PrimaryContainer.copy(alpha = 0.3f), RoundedCornerShape(100.dp))
             .padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment     = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            imageVector        = Icons.Outlined.TrendingUp,
+            imageVector = Icons.Outlined.TrendingUp,
             contentDescription = null,
-            tint               = Primary,
-            modifier           = Modifier.size(14.dp)
+            tint = Primary,
+            modifier = Modifier.size(14.dp)
         )
         Text(
-            text  = "${"%.1f".format(rate)}% savings rate",
+            text = "${"%.1f".format(rate)}% savings rate",
             style = MaterialTheme.typography.labelLarge,
             color = Primary
         )
@@ -309,14 +455,17 @@ private fun SavingsRateChip(rate: Double) {
 // ── Breakdown section ──────────────────────────────────────────
 
 @Composable
-private fun IncomeBreakdownSection(visible: Boolean) {
+private fun IncomeBreakdownSection(
+    visible: Boolean,
+    categories: List<IncomeCategoryUi>
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
     ) {
         Text(
-            text  = "Breakdown",
+            text = "Breakdown",
             style = MaterialTheme.typography.headlineLarge,
             color = OnSurface
         )
@@ -325,9 +474,9 @@ private fun IncomeBreakdownSection(visible: Boolean) {
 
         // Animated bar
         val barProgress by animateFloatAsState(
-            targetValue   = if (visible) 1f else 0f,
+            targetValue = if (visible) 1f else 0f,
             animationSpec = tween(900, delayMillis = 200, easing = FastOutSlowInEasing),
-            label         = "income_bar"
+            label = "income_bar"
         )
         Box(
             modifier = Modifier
@@ -343,7 +492,9 @@ private fun IncomeBreakdownSection(visible: Boolean) {
                     .clip(RoundedCornerShape(100.dp))
                     .background(
                         Brush.horizontalGradient(
-                            colors = listOf(EssentialDot, LuxuryDot, SecondaryFixedDim, ExtraDot)
+                            colors = categories.ifEmpty {
+                                listOf(EssentialDot, LuxuryDot, SecondaryFixedDim, ExtraDot)
+                            }.map { it.color }
                         )
                     )
             )
@@ -351,29 +502,47 @@ private fun IncomeBreakdownSection(visible: Boolean) {
 
         Spacer(Modifier.height(12.dp))
 
+        val tiles = if (categories.isEmpty()) {
+            listOf(
+                IncomeCategoryUi("Salary", 0.0, EssentialDot, 0f),
+                IncomeCategoryUi("Freelance", 0.0, LuxuryDot, 0f),
+                IncomeCategoryUi("Passive", 0.0, SecondaryFixedDim, 0f),
+                IncomeCategoryUi("Business", 0.0, ExtraDot, 0f)
+            )
+        } else {
+            categories.padToSize(4) { index ->
+                IncomeCategoryUi(
+                    label = "Other",
+                    amount = 0.0,
+                    color = fallbackColor(index),
+                    fraction = 0f
+                )
+            }
+        }
+
         // 2×2 grid with spring scale-in
         listOf(
-            dummyIncomeCategories.take(2),
-            dummyIncomeCategories.drop(2)
+            tiles.take(2),
+            tiles.drop(2)
         ).forEachIndexed { rowIndex, rowItems ->
             Row(
-                modifier              = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 rowItems.forEachIndexed { colIndex, cat ->
                     val tileIndex = rowIndex * 2 + colIndex
                     val tileScale by animateFloatAsState(
-                        targetValue   = if (visible) 1f else 0.85f,
+                        targetValue = if (visible) 1f else 0.85f,
                         animationSpec = spring(
                             dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness    = Spring.StiffnessMediumLow
+                            stiffness = Spring.StiffnessMediumLow
                         ),
                         label = "income_tile_scale_$tileIndex"
                     )
                     val tileAlpha by animateFloatAsState(
-                        targetValue   = if (visible) 1f else 0f,
+                        targetValue = if (visible) 1f else 0f,
                         animationSpec = tween(300, delayMillis = 300 + tileIndex * 80),
-                        label         = "income_tile_alpha_$tileIndex"
+                        label = "income_tile_alpha_$tileIndex"
                     )
 
                     IncomeTile(
@@ -383,7 +552,7 @@ private fun IncomeBreakdownSection(visible: Boolean) {
                             .graphicsLayer {
                                 scaleX = tileScale
                                 scaleY = tileScale
-                                alpha  = tileAlpha
+                                alpha = tileAlpha
                             }
                     )
                 }
@@ -395,7 +564,7 @@ private fun IncomeBreakdownSection(visible: Boolean) {
 
 @Composable
 private fun IncomeTile(
-    category: IncomeCategory,
+    category: IncomeCategoryUi,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -406,12 +575,12 @@ private fun IncomeTile(
             .padding(12.dp)
     ) {
         Row(
-            verticalAlignment     = Alignment.CenterVertically,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Box(Modifier.size(7.dp).background(category.color, CircleShape))
             Text(
-                text  = category.label,
+                text = category.label,
                 style = MaterialTheme.typography.labelMedium,
                 color = OnSurfaceVariant
             )
@@ -420,7 +589,7 @@ private fun IncomeTile(
         Spacer(Modifier.height(6.dp))
 
         Text(
-            text  = "$${"%.0f".format(category.amount)}",
+            text = "$${"%.0f".format(category.amount)}",
             style = MaterialTheme.typography.titleLarge,
             color = OnSurface
         )
@@ -430,42 +599,54 @@ private fun IncomeTile(
 // ── Sources list ───────────────────────────────────────────────
 
 @Composable
-private fun IncomeSourcesSection(visible: Boolean) {
+private fun IncomeSourcesSection(
+    visible: Boolean,
+    sources: List<IncomeSourceUi>
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
     ) {
         Text(
-            text  = "Sources",
+            text = "Sources",
             style = MaterialTheme.typography.headlineLarge,
             color = OnSurface
         )
 
         Spacer(Modifier.height(16.dp))
 
-        dummyIncomeSources.forEachIndexed { index, source ->
+        if (sources.isEmpty()) {
+            Text(
+                text = "No income added yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = OnSurfaceVariant
+            )
+            return
+        }
+
+        sources.forEachIndexed { index, source ->
             val rowOffset by animateFloatAsState(
-                targetValue   = if (visible) 0f else 60f,
+                targetValue = if (visible) 0f else 60f,
                 animationSpec = tween(400, delayMillis = 300 + index * 70, easing = FastOutSlowInEasing),
-                label         = "income_row_offset_$index"
+                label = "income_row_offset_$index"
             )
             val rowAlpha by animateFloatAsState(
-                targetValue   = if (visible) 1f else 0f,
+                targetValue = if (visible) 1f else 0f,
                 animationSpec = tween(300, delayMillis = 300 + index * 70),
-                label         = "income_row_alpha_$index"
+                label = "income_row_alpha_$index"
             )
 
             Box(
                 modifier = Modifier.graphicsLayer {
                     translationX = rowOffset.dp.toPx()
-                    alpha        = rowAlpha
+                    alpha = rowAlpha
                 }
             ) {
                 IncomeSourceRow(source = source)
             }
 
-            if (index < dummyIncomeSources.lastIndex) {
+            if (index < sources.lastIndex) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -479,13 +660,13 @@ private fun IncomeSourcesSection(visible: Boolean) {
 }
 
 @Composable
-private fun IncomeSourceRow(source: IncomeSource) {
+private fun IncomeSourceRow(source: IncomeSourceUi) {
     var pressed by remember { mutableStateOf(false) }
     val pressScale by animateFloatAsState(
-        targetValue   = if (pressed) 0.97f else 1f,
+        targetValue = if (pressed) 0.97f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness    = Spring.StiffnessHigh
+            stiffness = Spring.StiffnessHigh
         ),
         label = "income_press_$source"
     )
@@ -495,13 +676,13 @@ private fun IncomeSourceRow(source: IncomeSource) {
             .fillMaxWidth()
             .scale(pressScale)
             .padding(vertical = 14.dp),
-        verticalAlignment     = Alignment.CenterVertically,
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
-            verticalAlignment     = Alignment.CenterVertically,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier              = Modifier.weight(1f)
+            modifier = Modifier.weight(1f)
         ) {
             Box(contentAlignment = Alignment.BottomEnd) {
                 Box(
@@ -513,10 +694,10 @@ private fun IncomeSourceRow(source: IncomeSource) {
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector        = source.icon,
+                        imageVector = source.icon,
                         contentDescription = null,
-                        tint               = Secondary,
-                        modifier           = Modifier.size(20.dp)
+                        tint = Secondary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
@@ -531,12 +712,12 @@ private fun IncomeSourceRow(source: IncomeSource) {
 
             Column {
                 Text(
-                    text  = source.name,
+                    text = source.name,
                     style = MaterialTheme.typography.titleLarge,
                     color = OnSurface
                 )
                 Text(
-                    text  = source.tag,
+                    text = source.tag,
                     style = MaterialTheme.typography.bodyMedium,
                     color = OnSurfaceVariant
                 )
@@ -544,11 +725,169 @@ private fun IncomeSourceRow(source: IncomeSource) {
         }
 
         Text(
-            text  = "+$${"%.2f".format(source.amount)}",
+            text = "+$${"%.2f".format(source.amount)}",
             style = MaterialTheme.typography.titleMedium,
             color = Secondary
         )
     }
+}
+
+// ── Add income sheet ───────────────────────────────────────────
+
+@Composable
+private fun AddIncomeBottomSheet(
+    onDismiss: () -> Unit,
+    onSave: (source: String, tag: String, amount: Double, date: LocalDate) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val formatter = remember { DateTimeFormatter.ofPattern("MMM d, yyyy") }
+
+    var source by remember { mutableStateOf("") }
+    var tag by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf("") }
+    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    val amountValue = amountText.toDoubleOrNull() ?: 0.0
+    val isValid by remember(source, tag, amountText) {
+        derivedStateOf { source.isNotBlank() && tag.isNotBlank() && amountValue > 0.0 }
+    }
+
+    if (showDatePicker) {
+        val initialMillis = selectedDate
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { millis ->
+                        selectedDate = Instant.ofEpochMilli(millis)
+                            .atZone(ZoneId.systemDefault())
+                            .toLocalDate()
+                    }
+                    showDatePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceContainerLow,
+        contentColor = OnSurface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = "Add Income",
+                style = MaterialTheme.typography.headlineMedium,
+                color = OnSurface
+            )
+
+            OutlinedTextField(
+                value = source,
+                onValueChange = { source = it },
+                label = { Text("Source") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            OutlinedTextField(
+                value = tag,
+                onValueChange = { tag = it },
+                label = { Text("Tag / Category") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            OutlinedTextField(
+                value = amountText,
+                onValueChange = { amountText = it },
+                label = { Text("Amount") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Date",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = OnSurfaceVariant
+                )
+                TextButton(onClick = { showDatePicker = true }) {
+                    Text(selectedDate.format(formatter))
+                }
+            }
+
+            FilledTonalButton(
+                onClick = {
+                    onSave(source.trim(), tag.trim(), amountValue, selectedDate)
+                    onDismiss()
+                },
+                enabled = isValid,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Save Income")
+            }
+
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+// ── Helpers ────────────────────────────────────────────────────
+
+private fun iconForTag(tag: String): ImageVector {
+    return when (tag.trim().lowercase()) {
+        "salary" -> Icons.Outlined.Work
+        "freelance" -> Icons.Outlined.Laptop
+        "passive" -> Icons.Outlined.TrendingUp
+        "business" -> Icons.Outlined.Storefront
+        "crypto" -> Icons.Outlined.CurrencyBitcoin
+        else -> Icons.Outlined.AccountBalanceWallet
+    }
+}
+
+private fun colorForTag(tag: String): Color {
+    return when (tag.trim().lowercase()) {
+        "salary" -> EssentialDot
+        "freelance" -> LuxuryDot
+        "passive" -> SecondaryFixedDim
+        "business" -> ExtraDot
+        else -> Secondary
+    }
+}
+
+private fun fallbackColor(index: Int): Color {
+    return listOf(EssentialDot, LuxuryDot, SecondaryFixedDim, ExtraDot)[index % 4]
+}
+
+private inline fun <T> List<T>.padToSize(size: Int, filler: (Int) -> T): List<T> {
+    if (this.size >= size) return this
+    val result = this.toMutableList()
+    for (i in this.size until size) {
+        result.add(filler(i))
+    }
+    return result
 }
 
 // ── FAB — no glow ──────────────────────────────────────────────
@@ -560,10 +899,10 @@ private fun FloatingIncomeAddButton(
 ) {
     var pressed by remember { mutableStateOf(false) }
     val pressScale by animateFloatAsState(
-        targetValue   = if (pressed) 0.90f else 1f,
+        targetValue = if (pressed) 0.90f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness    = Spring.StiffnessMedium
+            stiffness = Spring.StiffnessMedium
         ),
         label = "income_fab_press"
     )
@@ -576,16 +915,16 @@ private fun FloatingIncomeAddButton(
         modifier = modifier
             .size(52.dp)
             .scale(pressScale),
-        shape  = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = IconButtonDefaults.filledIconButtonColors(
             containerColor = SurfaceContainerHigh
         )
     ) {
         val iconRotation by animateFloatAsState(
-            targetValue   = if (pressed) 90f else 0f,
+            targetValue = if (pressed) 90f else 0f,
             animationSpec = spring(
                 dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness    = Spring.StiffnessMedium
+                stiffness = Spring.StiffnessMedium
             ),
             label = "income_icon_rotate"
         )
@@ -598,10 +937,10 @@ private fun FloatingIncomeAddButton(
         }
 
         Icon(
-            imageVector        = Icons.Outlined.Add,
+            imageVector = Icons.Outlined.Add,
             contentDescription = "Add income",
-            tint               = Secondary,
-            modifier           = Modifier
+            tint = Secondary,
+            modifier = Modifier
                 .size(22.dp)
                 .graphicsLayer { rotationZ = iconRotation }
         )
