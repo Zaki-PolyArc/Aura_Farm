@@ -1,6 +1,7 @@
 package com.example.aurafarm2.features.expenses
 
 import android.content.Context
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,10 +37,12 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
 
 // ── Local persistence (DataStore) ────────────────────────────────
@@ -120,6 +123,7 @@ private data class IncomeCategoryUi(
 )
 
 private const val TOTAL_EXPENSES = 1779.00
+private val DEFAULT_TAGS = listOf("Salary", "Freelance", "Passive", "Business", "Crypto", "Other")
 
 // ── Root screen ────────────────────────────────────────────────
 
@@ -369,7 +373,7 @@ private fun IncomeHeroSection(
             label = "income_count_up"
         )
         Text(
-            text = "$${"%.2f".format(animatedValue)}",
+            text = formatCurrency(animatedValue.toDouble()),
             style = MaterialTheme.typography.displayLarge,
             color = OnSurface,
             textAlign = TextAlign.Center
@@ -405,7 +409,7 @@ private fun SavedSpentPill(saved: Double, spent: Double) {
         ) {
             Box(Modifier.size(8.dp).background(IncomeGreen, CircleShape))
             Text(
-                text = "+$${"%.0f".format(saved)} Saved",
+                text = "+${formatCurrency(saved, 0)} Saved",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurface
             )
@@ -419,7 +423,7 @@ private fun SavedSpentPill(saved: Double, spent: Double) {
         ) {
             Box(Modifier.size(8.dp).background(ExpenseRed, CircleShape))
             Text(
-                text = "-$${"%.0f".format(spent)} Spent",
+                text = "-${formatCurrency(spent, 0)} Spent",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurface
             )
@@ -589,7 +593,7 @@ private fun IncomeTile(
         Spacer(Modifier.height(6.dp))
 
         Text(
-            text = "$${"%.0f".format(category.amount)}",
+            text = formatCurrency(category.amount, 0),
             style = MaterialTheme.typography.titleLarge,
             color = OnSurface
         )
@@ -725,7 +729,7 @@ private fun IncomeSourceRow(source: IncomeSourceUi) {
         }
 
         Text(
-            text = "+$${"%.2f".format(source.amount)}",
+            text = "+${formatCurrency(source.amount)}",
             style = MaterialTheme.typography.titleMedium,
             color = Secondary
         )
@@ -734,6 +738,7 @@ private fun IncomeSourceRow(source: IncomeSourceUi) {
 
 // ── Add income sheet ───────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddIncomeBottomSheet(
     onDismiss: () -> Unit,
@@ -743,14 +748,21 @@ private fun AddIncomeBottomSheet(
     val formatter = remember { DateTimeFormatter.ofPattern("MMM d, yyyy") }
 
     var source by remember { mutableStateOf("") }
-    var tag by remember { mutableStateOf("") }
+    var tag by remember { mutableStateOf(DEFAULT_TAGS.first()) }
+    var tagMenuExpanded by remember { mutableStateOf(false) }
     var amountText by remember { mutableStateOf("") }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var attemptedSave by remember { mutableStateOf(false) }
 
     val amountValue = amountText.toDoubleOrNull() ?: 0.0
-    val isValid by remember(source, tag, amountText) {
-        derivedStateOf { source.isNotBlank() && tag.isNotBlank() && amountValue > 0.0 }
+    val sourceError = attemptedSave && source.isBlank()
+    val tagError = attemptedSave && tag.isBlank()
+    val amountError = attemptedSave && amountValue <= 0.0
+    val amountFormatOk = amountText.isEmpty() || amountText.matches(Regex("^\\d{0,7}(\\.\\d{0,2})?$"))
+
+    val isValid by remember(source, tag, amountText, amountFormatOk) {
+        derivedStateOf { source.isNotBlank() && tag.isNotBlank() && amountValue > 0.0 && amountFormatOk }
     }
 
     if (showDatePicker) {
@@ -790,7 +802,8 @@ private fun AddIncomeBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+                .animateContentSize(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
@@ -804,22 +817,66 @@ private fun AddIncomeBottomSheet(
                 onValueChange = { source = it },
                 label = { Text("Source") },
                 singleLine = true,
+                isError = sourceError,
+                supportingText = {
+                    if (sourceError) Text("Source is required.")
+                },
                 modifier = Modifier.fillMaxWidth()
             )
 
-            OutlinedTextField(
-                value = tag,
-                onValueChange = { tag = it },
-                label = { Text("Tag / Category") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
+            ExposedDropdownMenuBox(
+                expanded = tagMenuExpanded,
+                onExpandedChange = { tagMenuExpanded = !tagMenuExpanded }
+            ) {
+                OutlinedTextField(
+                    value = tag,
+                    onValueChange = { },
+                    readOnly = true,
+                    label = { Text("Tag / Category") },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = tagMenuExpanded)
+                    },
+                    isError = tagError,
+                    supportingText = {
+                        if (tagError) Text("Pick a tag.")
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor()
+                )
+
+                ExposedDropdownMenu(
+                    expanded = tagMenuExpanded,
+                    onDismissRequest = { tagMenuExpanded = false }
+                ) {
+                    DEFAULT_TAGS.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = {
+                                tag = option
+                                tagMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
 
             OutlinedTextField(
                 value = amountText,
-                onValueChange = { amountText = it },
+                onValueChange = { input ->
+                    if (input.matches(Regex("^\\d{0,7}(\\.\\d{0,2})?$"))) {
+                        amountText = input
+                    }
+                },
                 label = { Text("Amount") },
                 singleLine = true,
+                isError = amountError || !amountFormatOk,
+                supportingText = {
+                    when {
+                        !amountFormatOk -> Text("Use up to 7 digits and 2 decimals.")
+                        amountError -> Text("Amount must be greater than 0.")
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -838,13 +895,27 @@ private fun AddIncomeBottomSheet(
                 }
             }
 
+            val saveScale by animateFloatAsState(
+                targetValue = if (isValid) 1f else 0.98f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                ),
+                label = "save_button_scale"
+            )
+
             FilledTonalButton(
                 onClick = {
-                    onSave(source.trim(), tag.trim(), amountValue, selectedDate)
-                    onDismiss()
+                    attemptedSave = true
+                    if (isValid) {
+                        onSave(source.trim(), tag.trim(), amountValue, selectedDate)
+                        onDismiss()
+                    }
                 },
                 enabled = isValid,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .scale(saveScale)
             ) {
                 Text("Save Income")
             }
@@ -879,6 +950,14 @@ private fun colorForTag(tag: String): Color {
 
 private fun fallbackColor(index: Int): Color {
     return listOf(EssentialDot, LuxuryDot, SecondaryFixedDim, ExtraDot)[index % 4]
+}
+
+private fun formatCurrency(amount: Double, maxFractionDigits: Int = 2): String {
+    val formatter = NumberFormat.getCurrencyInstance(Locale.getDefault()).apply {
+        maximumFractionDigits = maxFractionDigits
+        minimumFractionDigits = if (maxFractionDigits == 0) 0 else 2
+    }
+    return formatter.format(amount)
 }
 
 private inline fun <T> List<T>.padToSize(size: Int, filler: (Int) -> T): List<T> {
