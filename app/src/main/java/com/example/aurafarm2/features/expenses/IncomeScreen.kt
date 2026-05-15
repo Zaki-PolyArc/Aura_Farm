@@ -40,7 +40,7 @@ import org.json.JSONObject
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
@@ -489,10 +489,15 @@ private fun IncomeBreakdownSection(
                 .clip(RoundedCornerShape(100.dp))
                 .background(Color.White.copy(alpha = 0.05f))
         ) {
-            val gradientColors = if (categories.isEmpty()) {
+            val gradientColorsRaw = if (categories.isEmpty()) {
                 listOf(EssentialDot, LuxuryDot, SecondaryFixedDim, ExtraDot)
             } else {
                 categories.map { it.color }
+            }
+            val gradientColors = when {
+                gradientColorsRaw.isEmpty() -> listOf(EssentialDot, LuxuryDot)
+                gradientColorsRaw.size == 1 -> listOf(gradientColorsRaw.first(), gradientColorsRaw.first())
+                else -> gradientColorsRaw
             }
             Box(
                 modifier = Modifier
@@ -768,7 +773,7 @@ private fun AddIncomeBottomSheet(
 
     if (showDatePicker) {
         val initialMillis = selectedDate
-            .atStartOfDay(ZoneId.systemDefault())
+            .atStartOfDay(ZoneOffset.UTC)
             .toInstant()
             .toEpochMilli()
         val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
@@ -778,7 +783,7 @@ private fun AddIncomeBottomSheet(
                 TextButton(onClick = {
                     pickerState.selectedDateMillis?.let { millis ->
                         selectedDate = Instant.ofEpochMilli(millis)
-                            .atZone(ZoneId.systemDefault())
+                            .atZone(ZoneOffset.UTC)
                             .toLocalDate()
                     }
                     showDatePicker = false
@@ -879,7 +884,7 @@ private fun AddIncomeBottomSheet(
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
-            }
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
