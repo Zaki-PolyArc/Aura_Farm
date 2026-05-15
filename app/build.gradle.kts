@@ -11,7 +11,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.personalapp"
+        applicationId = "com.example.aurafarm2"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
