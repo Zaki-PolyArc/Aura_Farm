@@ -489,17 +489,18 @@ private fun IncomeBreakdownSection(
                 .clip(RoundedCornerShape(100.dp))
                 .background(Color.White.copy(alpha = 0.05f))
         ) {
+            val gradientColors = if (categories.isEmpty()) {
+                listOf(EssentialDot, LuxuryDot, SecondaryFixedDim, ExtraDot)
+            } else {
+                categories.map { it.color }
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth(barProgress)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(100.dp))
                     .background(
-                        Brush.horizontalGradient(
-                            colors = categories.ifEmpty {
-                                listOf(EssentialDot, LuxuryDot, SecondaryFixedDim, ExtraDot)
-                            }.map { it.color }
-                        )
+                        Brush.horizontalGradient(colors = gradientColors)
                     )
             )
         }
@@ -878,7 +879,7 @@ private fun AddIncomeBottomSheet(
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
-            )
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
