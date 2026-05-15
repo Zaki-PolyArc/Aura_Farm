@@ -40,7 +40,6 @@ import org.json.JSONObject
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -495,13 +494,11 @@ private fun IncomeBreakdownSection(
             } else {
                 categories.map { it.color }
             }
-
             val gradientColors = when {
                 gradientColorsRaw.isEmpty() -> listOf(EssentialDot, LuxuryDot)
                 gradientColorsRaw.size == 1 -> listOf(gradientColorsRaw.first(), gradientColorsRaw.first())
                 else -> gradientColorsRaw
             }
-
             Box(
                 modifier = Modifier
                     .fillMaxWidth(barProgress)
@@ -779,9 +776,7 @@ private fun AddIncomeBottomSheet(
             .atStartOfDay(ZoneOffset.UTC)
             .toInstant()
             .toEpochMilli()
-
         val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
@@ -792,7 +787,9 @@ private fun AddIncomeBottomSheet(
                             .toLocalDate()
                     }
                     showDatePicker = false
-                }) { Text("OK") }
+                }) {
+                    Text("OK")
+                }
             },
             dismissButton = {
                 TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
