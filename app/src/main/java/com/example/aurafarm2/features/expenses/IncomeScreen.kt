@@ -18,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -50,9 +49,20 @@ import java.util.UUID
 private val Context.incomeDataStore by preferencesDataStore(name = "income_store")
 private val INCOME_ENTRIES_KEY = stringPreferencesKey("income_entries_json")
 
+private val Context.expenseDataStore by preferencesDataStore(name = "expense_store")
+private val EXPENSE_ENTRIES_KEY = stringPreferencesKey("expense_entries_json")
+
 private data class IncomeEntry(
     val id: String,
     val source: String,
+    val tag: String,
+    val amount: Double,
+    val dateEpochDay: Long
+)
+
+private data class ExpenseEntry(
+    val id: String,
+    val name: String,
     val tag: String,
     val amount: Double,
     val dateEpochDay: Long
@@ -62,6 +72,12 @@ private fun incomeEntriesFlow(context: Context): Flow<List<IncomeEntry>> =
     context.incomeDataStore.data.map { prefs ->
         val raw = prefs[INCOME_ENTRIES_KEY] ?: "[]"
         decodeIncomeEntries(raw)
+    }
+
+private fun expenseEntriesFlow(context: Context): Flow<List<ExpenseEntry>> =
+    context.expenseDataStore.data.map { prefs ->
+        val raw = prefs[EXPENSE_ENTRIES_KEY] ?: "[]"
+        decodeExpenseEntries(raw)
     }
 
 private suspend fun saveIncomeEntry(context: Context, entry: IncomeEntry) {
@@ -105,6 +121,26 @@ private fun decodeIncomeEntries(raw: String): List<IncomeEntry> {
     }.getOrElse { emptyList() }
 }
 
+private fun decodeExpenseEntries(raw: String): List<ExpenseEntry> {
+    return runCatching {
+        val array = JSONArray(raw)
+        buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                add(
+                    ExpenseEntry(
+                        id = obj.optString("id"),
+                        name = obj.optString("name"),
+                        tag = obj.optString("tag"),
+                        amount = obj.optDouble("amount"),
+                        dateEpochDay = obj.optLong("dateEpochDay")
+                    )
+                )
+            }
+        }
+    }.getOrElse { emptyList() }
+}
+
 // ── UI models ───────────────────────────────────────────────────
 
 private data class IncomeSourceUi(
@@ -122,7 +158,6 @@ private data class IncomeCategoryUi(
     val fraction: Float
 )
 
-private const val TOTAL_EXPENSES = 1779.00
 private val DEFAULT_TAGS = listOf("Salary", "Freelance", "Passive", "Business", "Crypto", "Other")
 
 // ── Root screen ────────────────────────────────────────────────
@@ -136,13 +171,25 @@ fun IncomeScreen(onAddClick: () -> Unit = {}) {
         incomeEntriesFlow(context)
     }.collectAsState(initial = emptyList())
 
+    val expenseEntries by remember {
+        expenseEntriesFlow(context)
+    }.collectAsState(initial = emptyList())
+
     val totalIncome by remember(incomeEntries) {
         derivedStateOf { incomeEntries.sumOf { it.amount } }
     }
 
-    val savingsRate by remember(totalIncome) {
+    val totalExpenses by remember(expenseEntries) {
+        derivedStateOf { expenseEntries.sumOf { it.amount } }
+    }
+
+    val netAmount by remember(totalIncome, totalExpenses) {
+        derivedStateOf { totalIncome - totalExpenses }
+    }
+
+    val savingsRate by remember(totalIncome, netAmount) {
         derivedStateOf {
-            if (totalIncome <= 0.0) 0.0 else ((totalIncome - TOTAL_EXPENSES) / totalIncome) * 100.0
+            if (totalIncome <= 0.0) 0.0 else (netAmount / totalIncome) * 100.0
         }
     }
 
@@ -203,10 +250,12 @@ fun IncomeScreen(onAddClick: () -> Unit = {}) {
             }
 
             AnimatedIncomeSection(visible = visible, delayMs = 80) {
-                IncomeHeroSection(
+                HeroSummarySection(
                     visible = visible,
-                    totalIncome = totalIncome,
-                    totalExpenses = TOTAL_EXPENSES,
+                    title = "MONTHLY INCOME",
+                    value = totalIncome,
+                    income = totalIncome,
+                    expense = totalExpenses,
                     savingsRate = savingsRate
                 )
             }
@@ -345,10 +394,12 @@ private fun IncomeTopBar() {
 // ── Hero section ───────────────────────────────────────────────
 
 @Composable
-private fun IncomeHeroSection(
+private fun HeroSummarySection(
     visible: Boolean,
-    totalIncome: Double,
-    totalExpenses: Double,
+    title: String,
+    value: Double,
+    income: Double,
+    expense: Double,
     savingsRate: Double
 ) {
     Column(
@@ -358,7 +409,7 @@ private fun IncomeHeroSection(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "MONTHLY INCOME",
+            text = title,
             style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 2.sp),
             color = OnSurfaceVariant,
             textAlign = TextAlign.Center
@@ -366,11 +417,10 @@ private fun IncomeHeroSection(
 
         Spacer(Modifier.height(8.dp))
 
-        // Count-up
         val animatedValue by animateFloatAsState(
-            targetValue = if (visible) totalIncome.toFloat() else 0f,
+            targetValue = if (visible) value.toFloat() else 0f,
             animationSpec = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
-            label = "income_count_up"
+            label = "hero_count_up"
         )
         Text(
             text = formatCurrency(animatedValue.toDouble()),
@@ -381,10 +431,7 @@ private fun IncomeHeroSection(
 
         Spacer(Modifier.height(20.dp))
 
-        SavedSpentPill(
-            saved = totalIncome - totalExpenses,
-            spent = totalExpenses
-        )
+        InOutPill(visible = visible, income = income, expense = expense)
 
         Spacer(Modifier.height(16.dp))
 
@@ -393,7 +440,18 @@ private fun IncomeHeroSection(
 }
 
 @Composable
-private fun SavedSpentPill(saved: Double, spent: Double) {
+private fun InOutPill(visible: Boolean, income: Double, expense: Double) {
+    val animatedIncome by animateFloatAsState(
+        targetValue = if (visible) income.toFloat() else 0f,
+        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+        label = "pill_income"
+    )
+    val animatedExpense by animateFloatAsState(
+        targetValue = if (visible) expense.toFloat() else 0f,
+        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+        label = "pill_expense"
+    )
+
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(100.dp))
@@ -409,7 +467,7 @@ private fun SavedSpentPill(saved: Double, spent: Double) {
         ) {
             Box(Modifier.size(8.dp).background(IncomeGreen, CircleShape))
             Text(
-                text = "+${formatCurrency(saved, 0)} Saved",
+                text = "+${formatCurrency(animatedIncome.toDouble(), 0)} In",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurface
             )
@@ -423,7 +481,7 @@ private fun SavedSpentPill(saved: Double, spent: Double) {
         ) {
             Box(Modifier.size(8.dp).background(ExpenseRed, CircleShape))
             Text(
-                text = "-${formatCurrency(spent, 0)} Spent",
+                text = "-${formatCurrency(animatedExpense.toDouble(), 0)} Out",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurface
             )
@@ -476,42 +534,6 @@ private fun IncomeBreakdownSection(
 
         Spacer(Modifier.height(16.dp))
 
-        // Animated bar
-        val barProgress by animateFloatAsState(
-            targetValue = if (visible) 1f else 0f,
-            animationSpec = tween(900, delayMillis = 200, easing = FastOutSlowInEasing),
-            label = "income_bar"
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(100.dp))
-                .background(Color.White.copy(alpha = 0.05f))
-        ) {
-            val gradientColorsRaw = if (categories.isEmpty()) {
-                listOf(EssentialDot, LuxuryDot, SecondaryFixedDim, ExtraDot)
-            } else {
-                categories.map { it.color }
-            }
-            val gradientColors = when {
-                gradientColorsRaw.isEmpty() -> listOf(EssentialDot, LuxuryDot)
-                gradientColorsRaw.size == 1 -> listOf(gradientColorsRaw.first(), gradientColorsRaw.first())
-                else -> gradientColorsRaw
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(barProgress)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(100.dp))
-                    .background(
-                        Brush.horizontalGradient(colors = gradientColors)
-                    )
-            )
-        }
-
-        Spacer(Modifier.height(12.dp))
-
         val tiles = if (categories.isEmpty()) {
             listOf(
                 IncomeCategoryUi("Salary", 0.0, EssentialDot, 0f),
@@ -529,6 +551,15 @@ private fun IncomeBreakdownSection(
                 )
             }
         }
+
+        val segments = tiles.mapIndexed { index, tile ->
+            val fraction = categories.getOrNull(index)?.fraction ?: 0f
+            tile.color to fraction
+        }
+
+        SegmentedBar(visible = visible, segments = segments)
+
+        Spacer(Modifier.height(12.dp))
 
         // 2×2 grid with spring scale-in
         listOf(
@@ -568,6 +599,52 @@ private fun IncomeBreakdownSection(
                 }
             }
             if (rowIndex == 0) Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun SegmentedBar(
+    visible: Boolean,
+    segments: List<Pair<Color, Float>>
+) {
+    val safeSegments = if (segments.isEmpty()) {
+        listOf(EssentialDot to 1f, LuxuryDot to 1f)
+    } else {
+        segments
+    }
+    val total = safeSegments.sumOf { it.second.toDouble() }.toFloat()
+    val normalized = if (total <= 0f) {
+        safeSegments.map { it.first to (1f / safeSegments.size) }
+    } else {
+        safeSegments.map { it.first to (it.second / total) }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(RoundedCornerShape(100.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            normalized.forEachIndexed { index, (color, fraction) ->
+                val animatedFraction by animateFloatAsState(
+                    targetValue = if (visible) fraction else 0f,
+                    animationSpec = tween(700, delayMillis = 200 + index * 70, easing = FastOutSlowInEasing),
+                    label = "segment_$index"
+                )
+                if (animatedFraction > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .weight(animatedFraction)
+                            .background(color)
+                    )
+                }
+            }
         }
     }
 }
