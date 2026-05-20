@@ -26,16 +26,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import com.example.aurafarm2.core.theme.*
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -43,103 +36,6 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
-
-// ── Local persistence (DataStore) ────────────────────────────────
-
-private val Context.incomeDataStore by preferencesDataStore(name = "income_store")
-private val INCOME_ENTRIES_KEY = stringPreferencesKey("income_entries_json")
-
-private val Context.expenseDataStore by preferencesDataStore(name = "expense_store")
-private val EXPENSE_ENTRIES_KEY = stringPreferencesKey("expense_entries_json")
-
-private data class IncomeEntry(
-    val id: String,
-    val source: String,
-    val tag: String,
-    val amount: Double,
-    val dateEpochDay: Long
-)
-
-private data class ExpenseEntry(
-    val id: String,
-    val name: String,
-    val tag: String,
-    val amount: Double,
-    val dateEpochDay: Long
-)
-
-private fun incomeEntriesFlow(context: Context): Flow<List<IncomeEntry>> =
-    context.incomeDataStore.data.map { prefs ->
-        val raw = prefs[INCOME_ENTRIES_KEY] ?: "[]"
-        decodeIncomeEntries(raw)
-    }
-
-private fun expenseEntriesFlow(context: Context): Flow<List<ExpenseEntry>> =
-    context.expenseDataStore.data.map { prefs ->
-        val raw = prefs[EXPENSE_ENTRIES_KEY] ?: "[]"
-        decodeExpenseEntries(raw)
-    }
-
-private suspend fun saveIncomeEntry(context: Context, entry: IncomeEntry) {
-    context.incomeDataStore.edit { prefs ->
-        val current = decodeIncomeEntries(prefs[INCOME_ENTRIES_KEY] ?: "[]")
-        prefs[INCOME_ENTRIES_KEY] = encodeIncomeEntries(current + entry)
-    }
-}
-
-private fun encodeIncomeEntries(entries: List<IncomeEntry>): String {
-    val array = JSONArray()
-    entries.forEach { entry ->
-        val obj = JSONObject()
-        obj.put("id", entry.id)
-        obj.put("source", entry.source)
-        obj.put("tag", entry.tag)
-        obj.put("amount", entry.amount)
-        obj.put("dateEpochDay", entry.dateEpochDay)
-        array.put(obj)
-    }
-    return array.toString()
-}
-
-private fun decodeIncomeEntries(raw: String): List<IncomeEntry> {
-    return runCatching {
-        val array = JSONArray(raw)
-        buildList {
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                add(
-                    IncomeEntry(
-                        id = obj.optString("id"),
-                        source = obj.optString("source"),
-                        tag = obj.optString("tag"),
-                        amount = obj.optDouble("amount"),
-                        dateEpochDay = obj.optLong("dateEpochDay")
-                    )
-                )
-            }
-        }
-    }.getOrElse { emptyList() }
-}
-
-private fun decodeExpenseEntries(raw: String): List<ExpenseEntry> {
-    return runCatching {
-        val array = JSONArray(raw)
-        buildList {
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                add(
-                    ExpenseEntry(
-                        id = obj.optString("id"),
-                        name = obj.optString("name"),
-                        tag = obj.optString("tag"),
-                        amount = obj.optDouble("amount"),
-                        dateEpochDay = obj.optLong("dateEpochDay")
-                    )
-                )
-            }
-        }
-    }.getOrElse { emptyList() }
-}
 
 // ── UI models ───────────────────────────────────────────────────
 

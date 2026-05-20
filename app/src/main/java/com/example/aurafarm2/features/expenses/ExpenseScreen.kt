@@ -18,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -27,16 +26,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import com.example.aurafarm2.core.theme.*
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -44,103 +36,6 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
-
-// ── Local persistence (DataStore) ────────────────────────────────
-
-private val Context.expenseDataStore by preferencesDataStore(name = "expense_store")
-private val EXPENSE_ENTRIES_KEY = stringPreferencesKey("expense_entries_json")
-
-private val Context.incomeDataStore by preferencesDataStore(name = "income_store")
-private val INCOME_ENTRIES_KEY = stringPreferencesKey("income_entries_json")
-
-private data class ExpenseEntry(
-    val id: String,
-    val name: String,
-    val tag: String,
-    val amount: Double,
-    val dateEpochDay: Long
-)
-
-private data class IncomeEntry(
-    val id: String,
-    val source: String,
-    val tag: String,
-    val amount: Double,
-    val dateEpochDay: Long
-)
-
-private fun expenseEntriesFlow(context: Context): Flow<List<ExpenseEntry>> =
-    context.expenseDataStore.data.map { prefs ->
-        val raw = prefs[EXPENSE_ENTRIES_KEY] ?: "[]"
-        decodeExpenseEntries(raw)
-    }
-
-private fun incomeEntriesFlow(context: Context): Flow<List<IncomeEntry>> =
-    context.incomeDataStore.data.map { prefs ->
-        val raw = prefs[INCOME_ENTRIES_KEY] ?: "[]"
-        decodeIncomeEntries(raw)
-    }
-
-private suspend fun saveExpenseEntry(context: Context, entry: ExpenseEntry) {
-    context.expenseDataStore.edit { prefs ->
-        val current = decodeExpenseEntries(prefs[EXPENSE_ENTRIES_KEY] ?: "[]")
-        prefs[EXPENSE_ENTRIES_KEY] = encodeExpenseEntries(current + entry)
-    }
-}
-
-private fun encodeExpenseEntries(entries: List<ExpenseEntry>): String {
-    val array = JSONArray()
-    entries.forEach { entry ->
-        val obj = JSONObject()
-        obj.put("id", entry.id)
-        obj.put("name", entry.name)
-        obj.put("tag", entry.tag)
-        obj.put("amount", entry.amount)
-        obj.put("dateEpochDay", entry.dateEpochDay)
-        array.put(obj)
-    }
-    return array.toString()
-}
-
-private fun decodeExpenseEntries(raw: String): List<ExpenseEntry> {
-    return runCatching {
-        val array = JSONArray(raw)
-        buildList {
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                add(
-                    ExpenseEntry(
-                        id = obj.optString("id"),
-                        name = obj.optString("name"),
-                        tag = obj.optString("tag"),
-                        amount = obj.optDouble("amount"),
-                        dateEpochDay = obj.optLong("dateEpochDay")
-                    )
-                )
-            }
-        }
-    }.getOrElse { emptyList() }
-}
-
-private fun decodeIncomeEntries(raw: String): List<IncomeEntry> {
-    return runCatching {
-        val array = JSONArray(raw)
-        buildList {
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                add(
-                    IncomeEntry(
-                        id = obj.optString("id"),
-                        source = obj.optString("source"),
-                        tag = obj.optString("tag"),
-                        amount = obj.optDouble("amount"),
-                        dateEpochDay = obj.optLong("dateEpochDay")
-                    )
-                )
-            }
-        }
-    }.getOrElse { emptyList() }
-}
 
 // ── UI models ───────────────────────────────────────────────────
 
@@ -256,7 +151,12 @@ fun ExpenseScreen(onAddClick: () -> Unit = {}) {
             }
 
             AnimatedSection(visible = visible, delayMs = 80) {
-                HeroNetSection(visible = visible, net = netAmount)
+                HeroNetSection(
+                    visible = visible,
+                    net = netAmount,
+                    income = totalIncome,
+                    expense = totalExpenses
+                )
             }
 
             Spacer(Modifier.height(32.dp))
@@ -403,7 +303,7 @@ private fun ExpenseTopBar() {
 // ── Hero section ───────────────────────────────────────────────
 
 @Composable
-private fun HeroNetSection(visible: Boolean, net: Double) {
+private fun HeroNetSection(visible: Boolean, net: Double, income: Double, expense: Double) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -424,7 +324,7 @@ private fun HeroNetSection(visible: Boolean, net: Double) {
 
         Spacer(Modifier.height(20.dp))
 
-        InOutPill(income = 0.0, expense = 0.0, actualIncome = null, actualExpense = null)
+        InOutPill(visible = visible, income = income, expense = expense)
     }
 }
 
@@ -446,14 +346,17 @@ private fun CountUpNumber(target: Double, visible: Boolean) {
 }
 
 @Composable
-private fun InOutPill(
-    income: Double,
-    expense: Double,
-    actualIncome: Double?,
-    actualExpense: Double?
-) {
-    val incomeValue = actualIncome ?: income
-    val expenseValue = actualExpense ?: expense
+private fun InOutPill(visible: Boolean, income: Double, expense: Double) {
+    val animatedIncome by animateFloatAsState(
+        targetValue = if (visible) income.toFloat() else 0f,
+        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+        label = "pill_income"
+    )
+    val animatedExpense by animateFloatAsState(
+        targetValue = if (visible) expense.toFloat() else 0f,
+        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+        label = "pill_expense"
+    )
 
     Row(
         modifier = Modifier
@@ -470,7 +373,7 @@ private fun InOutPill(
         ) {
             Box(Modifier.size(8.dp).background(IncomeGreen, CircleShape))
             Text(
-                text = "+${formatCurrency(incomeValue, 0)} In",
+                text = "+${formatCurrency(animatedIncome.toDouble(), 0)} In",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurface
             )
@@ -484,7 +387,7 @@ private fun InOutPill(
         ) {
             Box(Modifier.size(8.dp).background(ExpenseRed, CircleShape))
             Text(
-                text = "-${formatCurrency(expenseValue, 0)} Out",
+                text = "-${formatCurrency(animatedExpense.toDouble(), 0)} Out",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurface
             )
@@ -509,7 +412,8 @@ private fun AllocationSection(visible: Boolean, categories: List<ExpenseCategory
 
         Spacer(Modifier.height(16.dp))
 
-        AllocationBar(visible = visible, categories = categories)
+        val segments = categories.map { it.color to it.fraction }
+        AllocationSegmentedBar(visible = visible, segments = segments)
 
         Spacer(Modifier.height(12.dp))
 
@@ -566,41 +470,48 @@ private fun AllocationSection(visible: Boolean, categories: List<ExpenseCategory
 }
 
 @Composable
-private fun AllocationBar(visible: Boolean, categories: List<ExpenseCategoryUi>) {
-    // Bar animates width from 0 → full when visible
-    val progress by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(durationMillis = 900, delayMillis = 200, easing = FastOutSlowInEasing),
-        label = "alloc_bar"
-    )
-
-    val gradientColorsRaw = if (categories.isEmpty()) {
-        listOf(EssentialDot, LuxuryDot, ExtraDot)
+private fun AllocationSegmentedBar(
+    visible: Boolean,
+    segments: List<Pair<Color, Float>>
+) {
+    val safeSegments = if (segments.isEmpty()) {
+        listOf(EssentialDot to 1f, LuxuryDot to 1f)
     } else {
-        categories.map { it.color }
+        segments
     }
-    val gradientColors = when {
-        gradientColorsRaw.isEmpty() -> listOf(EssentialDot, LuxuryDot)
-        gradientColorsRaw.size == 1 -> listOf(gradientColorsRaw.first(), gradientColorsRaw.first())
-        else -> gradientColorsRaw
+    val total = safeSegments.sumOf { it.second.toDouble() }.toFloat()
+    val normalized = if (total <= 0f) {
+        safeSegments.map { it.first to (1f / safeSegments.size) }
+    } else {
+        safeSegments.map { it.first to (it.second / total) }
     }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(6.dp)
+            .height(10.dp) // Thicker for better visibility
             .clip(RoundedCornerShape(100.dp))
             .background(Color.White.copy(alpha = 0.05f))
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(progress)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(100.dp))
-                .background(
-                    Brush.horizontalGradient(colors = gradientColors)
+        Row(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            normalized.forEachIndexed { index, (color, fraction) ->
+                val animatedFraction by animateFloatAsState(
+                    targetValue = if (visible) fraction else 0f,
+                    animationSpec = tween(700, delayMillis = 200 + index * 70, easing = FastOutSlowInEasing),
+                    label = "segment_$index"
                 )
-        )
+                if (animatedFraction > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .weight(animatedFraction)
+                            .background(color)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -620,7 +531,7 @@ private fun AllocationTile(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Box(Modifier.size(7.dp).background(allocation.color, CircleShape))
+            Box(Modifier.size(8.dp).background(allocation.color, CircleShape))
             Text(
                 text = allocation.label,
                 style = MaterialTheme.typography.labelMedium,
@@ -986,10 +897,10 @@ private fun colorForTag(tag: String): Color {
         "dining" -> LuxuryDot
         "travel" -> LuxuryDot
         "subscription" -> ExtraDot
-        "utilities" -> SecondaryFixedDim
-        "health" -> Secondary
+        "utilities" -> EssentialDot
+        "health" -> LuxuryDot
         "shopping" -> ExtraDot
-        else -> Secondary
+        else -> EssentialDot
     }
 }
 

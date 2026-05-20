@@ -73,6 +73,7 @@ val ExpenseRed = Color(0xFF948979)
 val EssentialDot = Color(0xFFDFD0B8)
 val LuxuryDot = Color(0xFF948979)
 val ExtraDot = Color(0xFFB8AA97)
+val PassiveDot = Color(0xFFC8BAA3)
 
 // ── Glow helpers (used with alpha in code) ─────────────────────
 val GlowIndigo = Color(0xFF948979)
