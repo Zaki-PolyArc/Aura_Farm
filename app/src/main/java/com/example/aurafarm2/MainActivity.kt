@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.example.aurafarm2.core.theme.*
 import com.example.aurafarm2.features.expenses.ExpenseScreen
 import com.example.aurafarm2.features.expenses.IncomeScreen
@@ -30,6 +31,7 @@ import com.example.aurafarm2.features.expenses.SettingsScreen
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         createReminderChannel()

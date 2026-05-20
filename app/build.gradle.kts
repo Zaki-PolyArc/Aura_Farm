@@ -90,5 +90,8 @@ dependencies {
     // Security
     implementation(libs.androidx.biometric)
 
+    // Splash Screen
+    implementation(libs.androidx.core.splashscreen)
+
     debugImplementation(libs.androidx.ui.tooling)
 }

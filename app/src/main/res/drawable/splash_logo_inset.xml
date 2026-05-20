@@ -1,0 +1,11 @@
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="16dp"
+    android:insetTop="16dp"
+    android:insetRight="16dp"
+    android:insetBottom="16dp">
+
+    <bitmap
+        android:src="@drawable/ic_splash_logo"
+        android:gravity="center" />
+
+</inset>
