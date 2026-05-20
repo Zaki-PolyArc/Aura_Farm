@@ -1,10 +1,7 @@
 package com.example.aurafarm2.features.expenses
 
-import android.content.Context
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -18,121 +15,54 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.aurafarm2.core.theme.*
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.text.NumberFormat
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
-import java.util.Locale
-import java.util.UUID
 
-// ── UI models ───────────────────────────────────────────────────
+// ── Dummy data ─────────────────────────────────────────────────
 
-private data class ExpenseSourceUi(
+data class Transaction(
     val icon: ImageVector,
     val name: String,
-    val tag: String,
+    val category: String,
+    val date: String,
     val amount: Double,
-    val tagColor: Color
+    val categoryColor: Color
 )
 
-private data class ExpenseCategoryUi(
+data class AllocationCategory(
     val label: String,
-    val amount: Double,
+    val percent: Int,
     val color: Color,
     val fraction: Float
 )
 
-private val DEFAULT_TAGS = listOf(
-    "Groceries",
-    "Dining",
-    "Travel",
-    "Subscription",
-    "Utilities",
-    "Health",
-    "Shopping",
-    "Other"
+private val dummyTransactions = listOf(
+    Transaction(Icons.Outlined.ShoppingBag,  "Apple Store Soho",   "Essential", "Today, 2:45 PM", -1299.00, EssentialDot),
+    Transaction(Icons.Outlined.Restaurant,   "The Alchemist Bar",  "Luxury",    "Yesterday",       -84.20,  LuxuryDot),
+    Transaction(Icons.Outlined.HomeWork,     "Monthly Mortgage",   "Essential", "Oct 01",         -2450.00, EssentialDot),
+    Transaction(Icons.Outlined.Subscriptions,"Design System Pro",  "Extra",     "Sep 28",           -29.00, ExtraDot),
 )
+
+private val dummyAllocations = listOf(
+    AllocationCategory("Essential", 55, EssentialDot, 0.55f),
+    AllocationCategory("Luxury",    30, LuxuryDot,    0.30f),
+    AllocationCategory("Extra",     15, ExtraDot,     0.15f),
+)
+
+private const val MONTHLY_NET    = 4820.50
+private const val TOTAL_EXPENSES = 2140.0
 
 // ── Root screen ────────────────────────────────────────────────
 
 @Composable
 fun ExpenseScreen(onAddClick: () -> Unit = {}) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-
-    val expenseEntries by remember {
-        expenseEntriesFlow(context)
-    }.collectAsState(initial = emptyList())
-
-    val incomeEntries by remember {
-        incomeEntriesFlow(context)
-    }.collectAsState(initial = emptyList())
-
-    val totalExpenses by remember(expenseEntries) {
-        derivedStateOf { expenseEntries.sumOf { it.amount } }
-    }
-
-    val totalIncome by remember(incomeEntries) {
-        derivedStateOf { incomeEntries.sumOf { it.amount } }
-    }
-
-    val netAmount by remember(totalIncome, totalExpenses) {
-        derivedStateOf { totalIncome - totalExpenses }
-    }
-
-    val categories by remember(expenseEntries, totalExpenses) {
-        derivedStateOf {
-            val grouped = expenseEntries.groupBy { it.tag.ifBlank { "Other" } }
-            val raw = grouped.map { (tag, list) ->
-                ExpenseCategoryUi(
-                    label = tag,
-                    amount = list.sumOf { it.amount },
-                    color = colorForTag(tag),
-                    fraction = 0f
-                )
-            }
-            raw.sortedByDescending { it.amount }
-                .take(3)
-                .map { cat ->
-                    cat.copy(fraction = if (totalExpenses > 0) (cat.amount / totalExpenses).toFloat() else 0f)
-                }
-        }
-    }
-
-    val sources by remember(expenseEntries) {
-        derivedStateOf {
-            expenseEntries
-                .sortedByDescending { it.dateEpochDay }
-                .map { entry ->
-                    val date = LocalDate.ofEpochDay(entry.dateEpochDay)
-                    val dateText = date.format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
-                    ExpenseSourceUi(
-                        icon = iconForTag(entry.tag),
-                        name = entry.name,
-                        tag = "${entry.tag} • $dateText",
-                        amount = entry.amount,
-                        tagColor = colorForTag(entry.tag)
-                    )
-                }
-        }
-    }
-
-    var showAddSheet by remember { mutableStateOf(false) }
-
-    // Master trigger — flips to true on first composition,
-    // driving every entry animation on the screen.
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
 
@@ -146,79 +76,44 @@ fun ExpenseScreen(onAddClick: () -> Unit = {}) {
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
         ) {
-            AnimatedSection(visible = visible, delayMs = 0) {
-                ExpenseTopBar()
-            }
+            // Top bar
+            AnimatedSection(visible, 0) { ExpenseTopBar() }
 
-            AnimatedSection(visible = visible, delayMs = 80) {
-                HeroNetSection(
-                    visible = visible,
-                    net = netAmount,
-                    income = totalIncome,
-                    expense = totalExpenses
-                )
-            }
+            Spacer(Modifier.height(24.dp))
 
-            Spacer(Modifier.height(32.dp))
+            // Hero
+            AnimatedSection(visible, 80) { ExpenseHeroSection(visible) }
 
-            AnimatedSection(visible = visible, delayMs = 180) {
-                AllocationSection(visible = visible, categories = categories)
-            }
+            Spacer(Modifier.height(48.dp))
 
-            Spacer(Modifier.height(32.dp))
+            // Allocation
+            AnimatedSection(visible, 180) { AllocationSection(visible) }
 
-            AnimatedSection(visible = visible, delayMs = 260) {
-                RecentActivitySection(visible = visible, transactions = sources)
-            }
+            Spacer(Modifier.height(48.dp))
 
-            Spacer(Modifier.height(96.dp))
+            // Recent Activity
+            AnimatedSection(visible, 260) { RecentActivitySection(visible) }
+
+            Spacer(Modifier.height(100.dp))
         }
 
-        // FAB — springs in with a slight delay
+        // FAB — solid sand, bottom right
         val fabScale by animateFloatAsState(
-            targetValue = if (visible) 1f else 0f,
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessMedium
-            ),
-            label = "fab_scale"
+            targetValue   = if (visible) 1f else 0f,
+            animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
+            label         = "fab_scale"
         )
-
-        FloatingAddButton(
-            onClick = {
-                onAddClick()
-                showAddSheet = true
-            },
+        ExpenseFab(
+            onClick  = onAddClick,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 24.dp)
                 .scale(fabScale)
         )
     }
-
-    if (showAddSheet) {
-        AddExpenseBottomSheet(
-            onDismiss = { showAddSheet = false },
-            onSave = { name, tag, amount, date ->
-                scope.launch {
-                    saveExpenseEntry(
-                        context,
-                        ExpenseEntry(
-                            id = UUID.randomUUID().toString(),
-                            name = name,
-                            tag = tag,
-                            amount = amount,
-                            dateEpochDay = date.toEpochDay()
-                        )
-                    )
-                }
-            }
-        )
-    }
 }
 
-// ── Generic animated wrapper ───────────────────────────────────
-// Slides up + fades in. Every section uses this with a staggered delay.
+// ── Animated wrapper ───────────────────────────────────────────
 
 @Composable
 private fun AnimatedSection(
@@ -227,31 +122,16 @@ private fun AnimatedSection(
     content: @Composable () -> Unit
 ) {
     val offsetY by animateFloatAsState(
-        targetValue = if (visible) 0f else 40f,
-        animationSpec = tween(
-            durationMillis = 500,
-            delayMillis = delayMs,
-            easing = FastOutSlowInEasing
-        ),
-        label = "section_offset"
+        targetValue   = if (visible) 0f else 40f,
+        animationSpec = tween(500, delayMillis = delayMs, easing = FastOutSlowInEasing),
+        label         = "offset"
     )
     val alpha by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(
-            durationMillis = 400,
-            delayMillis = delayMs,
-            easing = FastOutSlowInEasing
-        ),
-        label = "section_alpha"
+        targetValue   = if (visible) 1f else 0f,
+        animationSpec = tween(400, delayMillis = delayMs, easing = FastOutSlowInEasing),
+        label         = "alpha"
     )
-
-    Box(
-        modifier = Modifier
-            .graphicsLayer {
-                translationY = offsetY.dp.toPx()
-                this.alpha = alpha
-            }
-    ) {
+    Box(Modifier.graphicsLayer { translationY = offsetY.dp.toPx(); this.alpha = alpha }) {
         content()
     }
 }
@@ -266,35 +146,36 @@ private fun ExpenseTopBar() {
             .statusBarsPadding()
             .padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment     = Alignment.CenterVertically
     ) {
+        // Avatar — rounded square like in screenshot
         Box(
             modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(SurfaceContainerHigh)
-                .border(1.dp, OutlineVariant, CircleShape),
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(SurfaceContainerHigh),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = "G",
-                style = MaterialTheme.typography.titleMedium,
-                color = Primary
+            Icon(
+                imageVector        = Icons.Outlined.Person,
+                contentDescription = null,
+                tint               = OnSurfaceVariant,
+                modifier           = Modifier.size(20.dp)
             )
         }
 
         Text(
-            text = "Expenses",
-            style = MaterialTheme.typography.headlineMedium,
-            color = OnSurface
+            text  = "Focus",
+            style = MaterialTheme.typography.headlineSmall,
+            color = Primary
         )
 
         IconButton(onClick = {}) {
             Icon(
-                imageVector = Icons.Outlined.Settings,
+                imageVector        = Icons.Outlined.Settings,
                 contentDescription = "Settings",
-                tint = OnSurfaceVariant,
-                modifier = Modifier.size(22.dp)
+                tint               = OnSurfaceVariant,
+                modifier           = Modifier.size(22.dp)
             )
         }
     }
@@ -303,309 +184,227 @@ private fun ExpenseTopBar() {
 // ── Hero section ───────────────────────────────────────────────
 
 @Composable
-private fun HeroNetSection(visible: Boolean, net: Double, income: Double, expense: Double) {
+private fun ExpenseHeroSection(visible: Boolean) {
     Column(
-        modifier = Modifier
+        modifier            = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Label — uppercase spaced
         Text(
-            text = "MONTHLY NET",
-            style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 2.sp),
-            color = OnSurfaceVariant,
+            text      = "MONTHLY NET BALANCE",
+            style     = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp),
+            color     = OnSurfaceVariant,
             textAlign = TextAlign.Center
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
 
-        // Animated count-up for the hero number
-        CountUpNumber(target = net, visible = visible)
+        // Count-up hero number — large, thin, sand color
+        val animVal by animateFloatAsState(
+            targetValue   = if (visible) MONTHLY_NET.toFloat() else 0f,
+            animationSpec = tween(1200, easing = FastOutSlowInEasing),
+            label         = "hero_count"
+        )
+        Text(
+            text      = "+${"%.2f".format(animVal)}",
+            style     = MaterialTheme.typography.displayLarge,
+            color     = Primary,
+            textAlign = TextAlign.Center
+        )
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
 
-        InOutPill(visible = visible, income = income, expense = expense)
-    }
-}
-
-// Counts up from 0 to target when visible flips true
-@Composable
-private fun CountUpNumber(target: Double, visible: Boolean) {
-    val animatedValue by animateFloatAsState(
-        targetValue = if (visible) target.toFloat() else 0f,
-        animationSpec = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
-        label = "count_up"
-    )
-
-    Text(
-        text = formatCurrency(animatedValue.toDouble()),
-        style = MaterialTheme.typography.displayLarge,
-        color = OnSurface,
-        textAlign = TextAlign.Center
-    )
-}
-
-@Composable
-private fun InOutPill(visible: Boolean, income: Double, expense: Double) {
-    val animatedIncome by animateFloatAsState(
-        targetValue = if (visible) income.toFloat() else 0f,
-        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
-        label = "pill_income"
-    )
-    val animatedExpense by animateFloatAsState(
-        targetValue = if (visible) expense.toFloat() else 0f,
-        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
-        label = "pill_expense"
-    )
-
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(100.dp))
-            .background(SurfaceContainerLow)
-            .border(1.dp, OutlineVariant, RoundedCornerShape(100.dp))
-            .padding(horizontal = 20.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Box(Modifier.size(8.dp).background(IncomeGreen, CircleShape))
-            Text(
-                text = "+${formatCurrency(animatedIncome.toDouble(), 0)} In",
-                style = MaterialTheme.typography.bodyMedium,
-                color = OnSurface
-            )
-        }
-
-        Box(Modifier.width(1.dp).height(16.dp).background(OutlineVariant))
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Box(Modifier.size(8.dp).background(ExpenseRed, CircleShape))
-            Text(
-                text = "-${formatCurrency(animatedExpense.toDouble(), 0)} Out",
-                style = MaterialTheme.typography.bodyMedium,
-                color = OnSurface
-            )
-        }
+        // Subtitle
+        Text(
+            text      = "Income outweighs expenses by 32% this month",
+            style     = MaterialTheme.typography.bodyMedium,
+            color     = OnSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
 // ── Allocation section ─────────────────────────────────────────
 
 @Composable
-private fun AllocationSection(visible: Boolean, categories: List<ExpenseCategoryUi>) {
+private fun AllocationSection(visible: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
     ) {
-        Text(
-            text = "Allocation",
-            style = MaterialTheme.typography.headlineLarge,
-            color = OnSurface
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        val segments = categories.map { it.color to it.fraction }
-        AllocationSegmentedBar(visible = visible, segments = segments)
-
-        Spacer(Modifier.height(12.dp))
-
-        val tiles = if (categories.isEmpty()) {
-            listOf(
-                ExpenseCategoryUi("Essential", 0.0, EssentialDot, 0f),
-                ExpenseCategoryUi("Luxury", 0.0, LuxuryDot, 0f),
-                ExpenseCategoryUi("Extra", 0.0, ExtraDot, 0f)
-            )
-        } else {
-            categories.padToSize(3) { index ->
-                ExpenseCategoryUi(
-                    label = "Other",
-                    amount = 0.0,
-                    color = fallbackColor(index),
-                    fraction = 0f
-                )
-            }
-        }
-
+        // Header row with total
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
         ) {
-            tiles.forEachIndexed { index, alloc ->
-                // Each tile springs in with its own delay
-                val tileScale by animateFloatAsState(
-                    targetValue = if (visible) 1f else 0.85f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    ),
-                    label = "tile_scale_$index"
-                )
-                val tileAlpha by animateFloatAsState(
-                    targetValue = if (visible) 1f else 0f,
-                    animationSpec = tween(300, delayMillis = 300 + index * 80),
-                    label = "tile_alpha_$index"
-                )
-
-                AllocationTile(
-                    allocation = alloc,
-                    modifier = Modifier
-                        .weight(1f)
-                        .graphicsLayer {
-                            scaleX = tileScale
-                            scaleY = tileScale
-                            alpha = tileAlpha
-                        }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AllocationSegmentedBar(
-    visible: Boolean,
-    segments: List<Pair<Color, Float>>
-) {
-    val safeSegments = if (segments.isEmpty()) {
-        listOf(EssentialDot to 1f, LuxuryDot to 1f)
-    } else {
-        segments
-    }
-    val total = safeSegments.sumOf { it.second.toDouble() }.toFloat()
-    val normalized = if (total <= 0f) {
-        safeSegments.map { it.first to (1f / safeSegments.size) }
-    } else {
-        safeSegments.map { it.first to (it.second / total) }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(10.dp) // Thicker for better visibility
-            .clip(RoundedCornerShape(100.dp))
-            .background(Color.White.copy(alpha = 0.05f))
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            normalized.forEachIndexed { index, (color, fraction) ->
-                val animatedFraction by animateFloatAsState(
-                    targetValue = if (visible) fraction else 0f,
-                    animationSpec = tween(700, delayMillis = 200 + index * 70, easing = FastOutSlowInEasing),
-                    label = "segment_$index"
-                )
-                if (animatedFraction > 0f) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .weight(animatedFraction)
-                            .background(color)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AllocationTile(
-    allocation: ExpenseCategoryUi,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(SurfaceContainerLow)
-            .border(1.dp, OutlineVariant, RoundedCornerShape(8.dp))
-            .padding(12.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Box(Modifier.size(8.dp).background(allocation.color, CircleShape))
             Text(
-                text = allocation.label,
+                text  = "Allocation",
+                style = MaterialTheme.typography.headlineMedium,
+                color = OnSurface
+            )
+            Text(
+                text  = "Total Exp: $${"%.0f".format(TOTAL_EXPENSES)}",
                 style = MaterialTheme.typography.labelMedium,
                 color = OnSurfaceVariant
             )
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(20.dp))
 
+        // Segmented bar — no gaps, fills full width
+        SegmentedAllocationBar(visible = visible)
+
+        Spacer(Modifier.height(20.dp))
+
+        // Three columns — dot + label + percent, no tile borders
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            dummyAllocations.forEach { alloc ->
+                AllocationLegendItem(alloc)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SegmentedAllocationBar(visible: Boolean) {
+    val progress by animateFloatAsState(
+        targetValue   = if (visible) 1f else 0f,
+        animationSpec = tween(900, delayMillis = 200, easing = FastOutSlowInEasing),
+        label         = "alloc_bar"
+    )
+
+    // Full-width segmented bar matching screenshot — sand | sage | rose
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(6.dp))
+    ) {
+        Row(modifier = Modifier.fillMaxSize()) {
+            // Essential — sand
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(0.55f * progress + 0.001f)
+                    .background(EssentialDot)
+            )
+            // Luxury — sage
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(0.30f * progress + 0.001f)
+                    .background(LuxuryDot)
+            )
+            // Extra — dusty rose
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .weight(0.15f * progress + 0.001f)
+                    .background(ExtraDot)
+            )
+            // Remaining unfilled portion (animates away)
+            if (progress < 1f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .weight(1f - progress)
+                        .background(SurfaceContainerHigh)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AllocationLegendItem(alloc: AllocationCategory) {
+    Column(horizontalAlignment = Alignment.Start) {
+        Row(
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(alloc.color, CircleShape)
+            )
+            Text(
+                text  = alloc.label,
+                style = MaterialTheme.typography.labelMedium,
+                color = OnSurfaceVariant
+            )
+        }
+        Spacer(Modifier.height(4.dp))
         Text(
-            text = formatCurrency(allocation.amount, 0),
-            style = MaterialTheme.typography.titleLarge,
+            text  = "${alloc.percent}%",
+            style = MaterialTheme.typography.titleMedium,
             color = OnSurface
         )
     }
 }
 
-// ── Recent activity ────────────────────────────────────────────
+// ── Recent Activity ────────────────────────────────────────────
 
 @Composable
-private fun RecentActivitySection(visible: Boolean, transactions: List<ExpenseSourceUi>) {
+private fun RecentActivitySection(visible: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
     ) {
-        Text(
-            text = "Recent Activity",
-            style = MaterialTheme.typography.headlineLarge,
-            color = OnSurface
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        if (transactions.isEmpty()) {
+        // Header with FILTER label
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
             Text(
-                text = "No expenses added yet.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = OnSurfaceVariant
+                text  = "Recent Activity",
+                style = MaterialTheme.typography.headlineMedium,
+                color = OnSurface
             )
-            return
+            Text(
+                text  = "FILTER",
+                style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.sp),
+                color = Primary
+            )
         }
 
-        transactions.forEachIndexed { index, transaction ->
-            // Each row slides in from right, staggered
+        Spacer(Modifier.height(24.dp))
+
+        dummyTransactions.forEachIndexed { index, tx ->
+            // Slide in from right, staggered
             val rowOffset by animateFloatAsState(
-                targetValue = if (visible) 0f else 60f,
-                animationSpec = tween(
-                    durationMillis = 400,
-                    delayMillis = 300 + index * 70,
-                    easing = FastOutSlowInEasing
-                ),
-                label = "row_offset_$index"
+                targetValue   = if (visible) 0f else 60f,
+                animationSpec = tween(400, delayMillis = 300 + index * 70, easing = FastOutSlowInEasing),
+                label         = "row_offset_$index"
             )
             val rowAlpha by animateFloatAsState(
-                targetValue = if (visible) 1f else 0f,
+                targetValue   = if (visible) 1f else 0f,
                 animationSpec = tween(300, delayMillis = 300 + index * 70),
-                label = "row_alpha_$index"
+                label         = "row_alpha_$index"
             )
 
             Box(
-                modifier = Modifier.graphicsLayer {
+                Modifier.graphicsLayer {
                     translationX = rowOffset.dp.toPx()
-                    alpha = rowAlpha
+                    alpha        = rowAlpha
                 }
             ) {
-                TransactionRow(transaction = transaction)
+                TransactionRow(tx)
             }
 
-            if (index < transactions.lastIndex) {
+            // Thin divider — 1px at 50% opacity
+            if (index < dummyTransactions.lastIndex) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 64.dp)
                         .height(1.dp)
                         .background(Divider)
                 )
@@ -615,372 +414,113 @@ private fun RecentActivitySection(visible: Boolean, transactions: List<ExpenseSo
 }
 
 @Composable
-private fun TransactionRow(transaction: ExpenseSourceUi) {
-    // Press scale — spring back on release
+private fun TransactionRow(tx: Transaction) {
     var pressed by remember { mutableStateOf(false) }
-    val pressScale by animateFloatAsState(
-        targetValue = if (pressed) 0.97f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessHigh
-        ),
-        label = "press_scale"
+    val scale by animateFloatAsState(
+        targetValue   = if (pressed) 0.97f else 1f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessHigh),
+        label         = "press_scale"
     )
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(pressScale)
-            .padding(vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .scale(scale)
+            .padding(vertical = 18.dp),
+        verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.weight(1f)
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            modifier              = Modifier.weight(1f)
         ) {
-            Box(contentAlignment = Alignment.BottomEnd) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(SurfaceContainerHigh)
-                        .border(1.dp, OutlineVariant, RoundedCornerShape(10.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = transaction.icon,
-                        contentDescription = null,
-                        tint = Primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(9.dp)
-                        .border(1.5.dp, Background, CircleShape)
-                        .background(transaction.tagColor, CircleShape)
-                        .offset(x = 2.dp, y = 2.dp)
+            // Icon box — rounded square, dark surface
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(SurfaceContainerHigh),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector        = tx.icon,
+                    contentDescription = null,
+                    tint               = OnSurfaceVariant,
+                    modifier           = Modifier.size(22.dp)
                 )
             }
 
+            // Name + category • date
             Column {
                 Text(
-                    text = transaction.name,
-                    style = MaterialTheme.typography.titleLarge,
+                    text  = tx.name,
+                    style = MaterialTheme.typography.titleMedium,
                     color = OnSurface
                 )
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = transaction.tag,
-                    style = MaterialTheme.typography.bodyMedium,
+                    text  = "${tx.category} • ${tx.date}",
+                    style = MaterialTheme.typography.bodySmall,
                     color = OnSurfaceVariant
                 )
             }
         }
 
+        // Amount
         Text(
-            text = "-${formatCurrency(transaction.amount)}",
-            style = MaterialTheme.typography.titleMedium,
+            text  = "-$${"%.2f".format(-tx.amount)}",
+            style = MaterialTheme.typography.titleSmall,
             color = OnSurface
         )
     }
 }
 
-// ── Add expense sheet ───────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AddExpenseBottomSheet(
-    onDismiss: () -> Unit,
-    onSave: (name: String, tag: String, amount: Double, date: LocalDate) -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val formatter = remember { DateTimeFormatter.ofPattern("MMM d, yyyy") }
-
-    var name by remember { mutableStateOf("") }
-    var tag by remember { mutableStateOf(DEFAULT_TAGS.first()) }
-    var tagMenuExpanded by remember { mutableStateOf(false) }
-    var amountText by remember { mutableStateOf("") }
-    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
-    var showDatePicker by remember { mutableStateOf(false) }
-    var attemptedSave by remember { mutableStateOf(false) }
-
-    val amountValue = amountText.toDoubleOrNull() ?: 0.0
-    val nameError = attemptedSave && name.isBlank()
-    val tagError = attemptedSave && tag.isBlank()
-    val amountError = attemptedSave && amountValue <= 0.0
-    val amountFormatOk = amountText.isEmpty() || amountText.matches(Regex("^\\d{0,7}(\\.\\d{0,2})?$"))
-
-    val isValid by remember(name, tag, amountText, amountFormatOk) {
-        derivedStateOf { name.isNotBlank() && tag.isNotBlank() && amountValue > 0.0 && amountFormatOk }
-    }
-
-    if (showDatePicker) {
-        val initialMillis = selectedDate
-            .atStartOfDay(ZoneOffset.UTC)
-            .toInstant()
-            .toEpochMilli()
-
-        val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    pickerState.selectedDateMillis?.let { millis ->
-                        selectedDate = Instant.ofEpochMilli(millis)
-                            .atZone(ZoneOffset.UTC)
-                            .toLocalDate()
-                    }
-                    showDatePicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
-            }
-        ) {
-            DatePicker(state = pickerState)
-        }
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = SurfaceContainerLow,
-        contentColor = OnSurface
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 16.dp)
-                .animateContentSize(),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Text(
-                text = "Add Expense",
-                style = MaterialTheme.typography.headlineMedium,
-                color = OnSurface
-            )
-
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Merchant / Name") },
-                singleLine = true,
-                isError = nameError,
-                supportingText = {
-                    if (nameError) Text("Name is required.")
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            ExposedDropdownMenuBox(
-                expanded = tagMenuExpanded,
-                onExpandedChange = { tagMenuExpanded = !tagMenuExpanded }
-            ) {
-                OutlinedTextField(
-                    value = tag,
-                    onValueChange = { },
-                    readOnly = true,
-                    label = { Text("Category") },
-                    trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = tagMenuExpanded)
-                    },
-                    isError = tagError,
-                    supportingText = {
-                        if (tagError) Text("Pick a category.")
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor()
-                )
-
-                ExposedDropdownMenu(
-                    expanded = tagMenuExpanded,
-                    onDismissRequest = { tagMenuExpanded = false }
-                ) {
-                    DEFAULT_TAGS.forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(option) },
-                            onClick = {
-                                tag = option
-                                tagMenuExpanded = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            OutlinedTextField(
-                value = amountText,
-                onValueChange = { input ->
-                    if (input.matches(Regex("^\\d{0,7}(\\.\\d{0,2})?$"))) {
-                        amountText = input
-                    }
-                },
-                label = { Text("Amount") },
-                singleLine = true,
-                isError = amountError || !amountFormatOk,
-                supportingText = {
-                    when {
-                        !amountFormatOk -> Text("Use up to 7 digits and 2 decimals.")
-                        amountError -> Text("Amount must be greater than 0.")
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Date",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = OnSurfaceVariant
-                )
-                TextButton(onClick = { showDatePicker = true }) {
-                    Text(selectedDate.format(formatter))
-                }
-            }
-
-            val saveScale by animateFloatAsState(
-                targetValue = if (isValid) 1f else 0.98f,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                ),
-                label = "save_button_scale"
-            )
-
-            FilledTonalButton(
-                onClick = {
-                    attemptedSave = true
-                    if (isValid) {
-                        onSave(name.trim(), tag.trim(), amountValue, selectedDate)
-                        onDismiss()
-                    }
-                },
-                enabled = isValid,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .scale(saveScale)
-            ) {
-                Text("Save Expense")
-            }
-
-            Spacer(Modifier.height(12.dp))
-        }
-    }
-}
-
-// ── Helpers ────────────────────────────────────────────────────
-
-private fun iconForTag(tag: String): ImageVector {
-    return when (tag.trim().lowercase()) {
-        "groceries" -> Icons.Outlined.ShoppingCart
-        "dining" -> Icons.Outlined.LocalCafe
-        "travel" -> Icons.Outlined.FlightTakeoff
-        "subscription" -> Icons.Outlined.Subscriptions
-        "utilities" -> Icons.Outlined.Bolt
-        "health" -> Icons.Outlined.MonitorHeart
-        "shopping" -> Icons.Outlined.ShoppingBag
-        else -> Icons.Outlined.ReceiptLong
-    }
-}
-
-private fun colorForTag(tag: String): Color {
-    return when (tag.trim().lowercase()) {
-        "groceries" -> EssentialDot
-        "dining" -> LuxuryDot
-        "travel" -> LuxuryDot
-        "subscription" -> ExtraDot
-        "utilities" -> EssentialDot
-        "health" -> LuxuryDot
-        "shopping" -> ExtraDot
-        else -> EssentialDot
-    }
-}
-
-private fun fallbackColor(index: Int): Color {
-    return listOf(EssentialDot, LuxuryDot, ExtraDot)[index % 3]
-}
-
-private fun formatCurrency(amount: Double, maxFractionDigits: Int = 2): String {
-    val formatter = NumberFormat.getCurrencyInstance(Locale.getDefault()).apply {
-        maximumFractionDigits = maxFractionDigits
-        minimumFractionDigits = if (maxFractionDigits == 0) 0 else 2
-    }
-    return formatter.format(amount)
-}
-
-private inline fun <T> List<T>.padToSize(size: Int, filler: (Int) -> T): List<T> {
-    if (this.size >= size) return this
-    val result = this.toMutableList()
-    for (i in this.size until size) {
-        result.add(filler(i))
-    }
-    return result
-}
-
-// ── FAB — no glow ──────────────────────────────────────────────
+// ── FAB ────────────────────────────────────────────────────────
 
 @Composable
-private fun FloatingAddButton(
+private fun ExpenseFab(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Press feedback
     var pressed by remember { mutableStateOf(false) }
     val pressScale by animateFloatAsState(
-        targetValue = if (pressed) 0.90f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "fab_press"
+        targetValue   = if (pressed) 0.88f else 1f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
+        label         = "fab_press"
+    )
+    val iconRotation by animateFloatAsState(
+        targetValue   = if (pressed) 90f else 0f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
+        label         = "fab_rotate"
     )
 
-    FilledIconButton(
-        onClick = {
-            pressed = true
-            onClick()
-        },
+    LaunchedEffect(pressed) {
+        if (pressed) { delay(280); pressed = false }
+    }
+
+    // Solid sand background, dark icon — matches screenshot exactly
+    Box(
         modifier = modifier
-            .size(52.dp)
-            .scale(pressScale),
-        shape = RoundedCornerShape(12.dp),
-        colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = SurfaceContainerHigh
-        )
+            .size(56.dp)
+            .scale(pressScale)
+            .clip(RoundedCornerShape(14.dp))
+            .background(FabBackground),
+        contentAlignment = Alignment.Center
     ) {
-        // Rotate icon on press
-        val iconRotation by animateFloatAsState(
-            targetValue = if (pressed) 90f else 0f,
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessMedium
-            ),
-            label = "icon_rotate"
-        )
-
-        LaunchedEffect(pressed) {
-            if (pressed) {
-                delay(300)
-                pressed = false
-            }
+        IconButton(
+            onClick = { pressed = true; onClick() },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Icon(
+                imageVector        = Icons.Outlined.Add,
+                contentDescription = "Add expense",
+                tint               = FabIcon,
+                modifier           = Modifier
+                    .size(24.dp)
+                    .graphicsLayer { rotationZ = iconRotation }
+            )
         }
-
-        Icon(
-            imageVector = Icons.Outlined.Add,
-            contentDescription = "Add expense",
-            tint = Primary,
-            modifier = Modifier
-                .size(22.dp)
-                .graphicsLayer { rotationZ = iconRotation }
-        )
     }
 }
 
@@ -989,7 +529,5 @@ private fun FloatingAddButton(
 @Preview(showBackground = true, backgroundColor = 0xFF13131A)
 @Composable
 fun ExpenseScreenPreview() {
-    com.example.aurafarm2.core.theme.AppTheme {
-        ExpenseScreen()
-    }
+    com.example.aurafarm2.core.theme.AppTheme { ExpenseScreen() }
 }
