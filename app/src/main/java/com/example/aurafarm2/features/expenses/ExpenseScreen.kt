@@ -53,7 +53,7 @@ data class AllocationCategory(
 
 // ── Root screen ────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ExpenseScreen() {
     val context = LocalContext.current
@@ -71,20 +71,37 @@ fun ExpenseScreen() {
     val totalExpenses = expenses.sumOf { it.amount }
     val netBalance = totalIncome - totalExpenses
 
-    val predefinedColors = listOf(EssentialDot, LuxuryDot, ExtraDot, Primary, Secondary)
-    val predefinedIcons = listOf(Icons.Outlined.ShoppingBag, Icons.Outlined.Restaurant, Icons.Outlined.HomeWork, Icons.Outlined.Subscriptions)
+    val categoryColors = mapOf(
+        "Food"          to EssentialDot,
+        "Transport"     to LuxuryDot,
+        "Utilities"     to ExtraDot,
+        "Entertainment" to SalaryDot,
+        "Shopping"      to FreelanceDot,
+        "Health"        to InvestmentDot,
+        "Other"         to Primary
+    )
+
+    val categoryIcons = mapOf(
+        "Food"          to Icons.Outlined.Restaurant,
+        "Transport"     to Icons.Outlined.DirectionsCar,
+        "Utilities"     to Icons.Outlined.HomeWork,
+        "Entertainment" to Icons.Outlined.PlayArrow,
+        "Shopping"      to Icons.Outlined.ShoppingBag,
+        "Health"        to Icons.Outlined.FavoriteBorder,
+        "Other"         to Icons.Outlined.List
+    )
 
     val groupedByCat = expenses.groupBy { it.tag }
-    val allocations = groupedByCat.entries.mapIndexed { index, (tag, entries) ->
+    val allocations = groupedByCat.entries.map { (tag, entries) ->
         val amount = entries.sumOf { it.amount }
         val percent = if (totalExpenses > 0) ((amount / totalExpenses) * 100).toInt() else 0
-        val color = predefinedColors.getOrElse(index % predefinedColors.size) { EssentialDot }
+        val color = categoryColors[tag] ?: Primary
         AllocationCategory(tag, percent, color, percent / 100f)
     }.sortedByDescending { it.percent }
 
-    val transactions = expenses.sortedByDescending { it.dateEpochDay }.take(10).mapIndexed { index, entry ->
-        val color = allocations.find { it.label == entry.tag }?.color ?: EssentialDot
-        val icon = predefinedIcons.getOrElse(index % predefinedIcons.size) { Icons.Outlined.ShoppingBag }
+    val transactions = expenses.sortedByDescending { it.dateEpochDay }.take(10).map { entry ->
+        val color = categoryColors[entry.tag] ?: Primary
+        val icon = categoryIcons[entry.tag] ?: Icons.Outlined.ShoppingBag
         
         val date = LocalDate.ofEpochDay(entry.dateEpochDay)
         val dateStr = "${date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())} ${date.dayOfMonth}"
@@ -170,7 +187,7 @@ fun AddExpenseBottomSheet(
     var name by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     
-    val categories = listOf("Essential", "Luxury", "Extra")
+    val categories = listOf("Food", "Transport", "Utilities", "Entertainment", "Shopping", "Health", "Other")
     var expanded by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf(categories[0]) }
 
@@ -435,6 +452,7 @@ private fun ExpenseHeroSection(visible: Boolean, netBalance: Double) {
 
 // ── Allocation section ─────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AllocationSection(visible: Boolean, totalExpenses: Double, allocations: List<AllocationCategory>) {
     Column(
@@ -472,11 +490,12 @@ private fun AllocationSection(visible: Boolean, totalExpenses: Double, allocatio
                 color = OnSurfaceVariant
             )
         } else {
-            Row(
-                modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                allocations.take(3).forEach { alloc ->
+                allocations.forEach { alloc ->
                     AllocationLegendItem(alloc)
                 }
             }
