@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -15,17 +16,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.aurafarm2.core.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.util.UUID
 
-// ── Dummy data ─────────────────────────────────────────────────
+// ── Models ─────────────────────────────────────────────────
 
 data class IncomeSource(
     val icon: ImageVector,
@@ -44,27 +48,39 @@ data class IncomeBreakdownItem(
     val fraction: Float
 )
 
-private val dummyIncomeSources = listOf(
-    IncomeSource(Icons.Outlined.Work,            "Salary",      "Tech Solutions Inc.", 8500.00, 68, SalaryDot),
-    IncomeSource(Icons.Outlined.Draw,            "Freelance",   "Design & Consulting", 3000.00, 24, FreelanceDot),
-    IncomeSource(Icons.Outlined.AccountBalance,  "Investments", "Dividends & Interest",  950.00,  8, InvestmentDot),
-)
-
-private val dummyBreakdown = listOf(
-    IncomeBreakdownItem("Salary",      8500.0, 68, SalaryDot,      0.68f),
-    IncomeBreakdownItem("Freelance",   3000.0, 24, FreelanceDot,   0.24f),
-    IncomeBreakdownItem("Investments",  950.0,  8, InvestmentDot,  0.08f),
-)
-
-private const val TOTAL_INCOME  = 12450.00
-private const val GROWTH_PERCENT = 8.4
-
 // ── Root screen ────────────────────────────────────────────────
 
 @Composable
-fun IncomeScreen(onAddClick: () -> Unit = {}) {
+fun IncomeScreen() {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    
+    val incomes by remember { incomeEntriesFlow(context) }.collectAsState(initial = emptyList())
+    var showAddDialog by remember { mutableStateOf(false) }
+
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
+
+    val totalIncome = incomes.sumOf { it.amount }
+    
+    // Group incomes dynamically
+    val groupedBySource = incomes.groupBy { it.source }
+    val predefinedColors = listOf(SalaryDot, FreelanceDot, InvestmentDot, Primary, Secondary)
+    val predefinedIcons = listOf(Icons.Outlined.Work, Icons.Outlined.Draw, Icons.Outlined.AccountBalance, Icons.Outlined.Payments, Icons.Outlined.Savings)
+    
+    val incomeSources = groupedBySource.entries.mapIndexed { index, (source, entries) ->
+        val amount = entries.sumOf { it.amount }
+        val percent = if (totalIncome > 0) ((amount / totalIncome) * 100).toInt() else 0
+        val color = predefinedColors.getOrElse(index % predefinedColors.size) { Primary }
+        val icon = predefinedIcons.getOrElse(index % predefinedIcons.size) { Icons.Outlined.Payments }
+        val tag = entries.firstOrNull()?.tag ?: ""
+        
+        IncomeSource(icon, source, tag, amount, percent, color)
+    }.sortedByDescending { it.amount }
+
+    val breakdownItems = incomeSources.map {
+        IncomeBreakdownItem(it.name, it.amount, it.percent, it.color, it.percent / 100f)
+    }
 
     Box(
         modifier = Modifier
@@ -80,15 +96,15 @@ fun IncomeScreen(onAddClick: () -> Unit = {}) {
 
             Spacer(Modifier.height(24.dp))
 
-            AnimatedIncomeSection(visible, 80)  { IncomeHeroSection(visible) }
+            AnimatedIncomeSection(visible, 80)  { IncomeHeroSection(visible, totalIncome) }
 
             Spacer(Modifier.height(48.dp))
 
-            AnimatedIncomeSection(visible, 160) { IncomeStreamsSection(visible) }
+            AnimatedIncomeSection(visible, 160) { IncomeStreamsSection(visible, incomeSources) }
 
             Spacer(Modifier.height(48.dp))
 
-            AnimatedIncomeSection(visible, 240) { BreakdownSection(visible) }
+            AnimatedIncomeSection(visible, 240) { BreakdownSection(visible, breakdownItems) }
 
             Spacer(Modifier.height(100.dp))
         }
@@ -99,13 +115,90 @@ fun IncomeScreen(onAddClick: () -> Unit = {}) {
             label         = "income_fab_scale"
         )
         IncomeFab(
-            onClick  = onAddClick,
+            onClick  = { showAddDialog = true },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 24.dp)
                 .scale(fabScale)
         )
     }
+
+    if (showAddDialog) {
+        AddIncomeDialog(
+            onDismiss = { showAddDialog = false },
+            onSave = { source, tag, amount ->
+                coroutineScope.launch {
+                    saveIncomeEntry(
+                        context,
+                        IncomeEntry(
+                            id = UUID.randomUUID().toString(),
+                            source = source.ifEmpty { "Other" },
+                            tag = tag.ifEmpty { "General" },
+                            amount = amount,
+                            dateEpochDay = LocalDate.now().toEpochDay()
+                        )
+                    )
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun AddIncomeDialog(onDismiss: () -> Unit, onSave: (String, String, Double) -> Unit) {
+    var source by remember { mutableStateOf("") }
+    var tag by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Income", color = OnSurface) },
+        containerColor = SurfaceContainerHigh,
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = source, 
+                    onValueChange = { source = it }, 
+                    label = { Text("Source (e.g. Salary)") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = OnSurface,
+                        unfocusedTextColor = OnSurface
+                    )
+                )
+                OutlinedTextField(
+                    value = tag, 
+                    onValueChange = { tag = it }, 
+                    label = { Text("Tag (e.g. Work)") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = OnSurface,
+                        unfocusedTextColor = OnSurface
+                    )
+                )
+                OutlinedTextField(
+                    value = amount, 
+                    onValueChange = { amount = it }, 
+                    label = { Text("Amount") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = OnSurface,
+                        unfocusedTextColor = OnSurface
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val amt = amount.toDoubleOrNull() ?: 0.0
+                if (amt > 0) {
+                    onSave(source, tag, amt)
+                    onDismiss()
+                }
+            }) { Text("Save", color = Primary) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = OnSurfaceVariant) }
+        }
+    )
 }
 
 // ── Animated wrapper ───────────────────────────────────────────
@@ -143,7 +236,6 @@ private fun IncomeTopBar() {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment     = Alignment.CenterVertically
     ) {
-        // Avatar rounded square
         Box(
             modifier = Modifier
                 .size(36.dp)
@@ -179,7 +271,7 @@ private fun IncomeTopBar() {
 // ── Hero ───────────────────────────────────────────────────────
 
 @Composable
-private fun IncomeHeroSection(visible: Boolean) {
+private fun IncomeHeroSection(visible: Boolean, totalIncome: Double) {
     Column(
         modifier            = Modifier
             .fillMaxWidth()
@@ -187,7 +279,7 @@ private fun IncomeHeroSection(visible: Boolean) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text      = "TOTAL MONTHLY INCOME",
+            text      = "TOTAL INCOME",
             style     = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp),
             color     = OnSurfaceVariant,
             textAlign = TextAlign.Center
@@ -197,7 +289,7 @@ private fun IncomeHeroSection(visible: Boolean) {
 
         // Count-up
         val animVal by animateFloatAsState(
-            targetValue   = if (visible) TOTAL_INCOME.toFloat() else 0f,
+            targetValue   = if (visible) totalIncome.toFloat() else 0f,
             animationSpec = tween(1200, easing = FastOutSlowInEasing),
             label         = "income_hero_count"
         )
@@ -207,45 +299,13 @@ private fun IncomeHeroSection(visible: Boolean) {
             color     = Primary,
             textAlign = TextAlign.Center
         )
-
-        Spacer(Modifier.height(16.dp))
-
-        // Growth chip — pill with trending up icon
-        val chipAlpha by animateFloatAsState(
-            targetValue   = if (visible) 1f else 0f,
-            animationSpec = tween(400, delayMillis = 600),
-            label         = "chip_alpha"
-        )
-        Row(
-            modifier = Modifier
-                .graphicsLayer { alpha = chipAlpha }
-                .clip(RoundedCornerShape(100.dp))
-                .background(SurfaceContainerHigh)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Icon(
-                imageVector        = Icons.Outlined.TrendingUp,
-                contentDescription = null,
-                tint               = Primary,
-                modifier           = Modifier.size(14.dp)
-            )
-            Text(
-                text  = "+${"%.1f".format(GROWTH_PERCENT)}% from last month",
-                style = MaterialTheme.typography.labelMedium,
-                color = Primary
-            )
-        }
     }
 }
 
 // ── Income Streams section ─────────────────────────────────────
-// Each source is a card — dark surface, icon top-left, percent top-right,
-// large name, subtitle, thin separator line, then amount.
 
 @Composable
-private fun IncomeStreamsSection(visible: Boolean) {
+private fun IncomeStreamsSection(visible: Boolean, sources: List<IncomeSource>) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -259,29 +319,38 @@ private fun IncomeStreamsSection(visible: Boolean) {
 
         Spacer(Modifier.height(20.dp))
 
-        dummyIncomeSources.forEachIndexed { index, source ->
-            val cardAlpha by animateFloatAsState(
-                targetValue   = if (visible) 1f else 0f,
-                animationSpec = tween(400, delayMillis = 200 + index * 100),
-                label         = "card_alpha_$index"
+        if (sources.isEmpty()) {
+            Text(
+                text = "No income sources yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = OnSurfaceVariant,
+                modifier = Modifier.padding(vertical = 16.dp)
             )
-            val cardOffset by animateFloatAsState(
-                targetValue   = if (visible) 0f else 30f,
-                animationSpec = tween(400, delayMillis = 200 + index * 100, easing = FastOutSlowInEasing),
-                label         = "card_offset_$index"
-            )
+        } else {
+            sources.forEachIndexed { index, source ->
+                val cardAlpha by animateFloatAsState(
+                    targetValue   = if (visible) 1f else 0f,
+                    animationSpec = tween(400, delayMillis = 200 + index * 100),
+                    label         = "card_alpha_$index"
+                )
+                val cardOffset by animateFloatAsState(
+                    targetValue   = if (visible) 0f else 30f,
+                    animationSpec = tween(400, delayMillis = 200 + index * 100, easing = FastOutSlowInEasing),
+                    label         = "card_offset_$index"
+                )
 
-            Box(
-                Modifier.graphicsLayer {
-                    alpha        = cardAlpha
-                    translationY = cardOffset.dp.toPx()
+                Box(
+                    Modifier.graphicsLayer {
+                        alpha        = cardAlpha
+                        translationY = cardOffset.dp.toPx()
+                    }
+                ) {
+                    IncomeStreamCard(source = source)
                 }
-            ) {
-                IncomeStreamCard(source = source)
-            }
 
-            if (index < dummyIncomeSources.lastIndex) {
-                Spacer(Modifier.height(12.dp))
+                if (index < sources.lastIndex) {
+                    Spacer(Modifier.height(12.dp))
+                }
             }
         }
     }
@@ -296,7 +365,6 @@ private fun IncomeStreamCard(source: IncomeSource) {
             .background(SurfaceContainerLow)
             .padding(20.dp)
     ) {
-        // Icon + percent row
         Row(
             modifier              = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -317,14 +385,12 @@ private fun IncomeStreamCard(source: IncomeSource) {
 
         Spacer(Modifier.height(12.dp))
 
-        // Stream name — large light weight
         Text(
             text  = source.name,
             style = MaterialTheme.typography.headlineMedium,
             color = OnSurface
         )
 
-        // Subtitle
         Text(
             text  = source.subtitle,
             style = MaterialTheme.typography.bodySmall,
@@ -333,7 +399,6 @@ private fun IncomeStreamCard(source: IncomeSource) {
 
         Spacer(Modifier.height(16.dp))
 
-        // Thin separator — sand color, partial width matching percent
         Box(
             modifier = Modifier
                 .fillMaxWidth(source.percent / 100f)
@@ -341,7 +406,6 @@ private fun IncomeStreamCard(source: IncomeSource) {
                 .background(source.color)
         )
 
-        // Full width dim track
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -351,7 +415,6 @@ private fun IncomeStreamCard(source: IncomeSource) {
 
         Spacer(Modifier.height(12.dp))
 
-        // Amount
         Text(
             text  = "$${"%.2f".format(source.amount)}",
             style = MaterialTheme.typography.titleLarge,
@@ -363,7 +426,7 @@ private fun IncomeStreamCard(source: IncomeSource) {
 // ── Breakdown section ──────────────────────────────────────────
 
 @Composable
-private fun BreakdownSection(visible: Boolean) {
+private fun BreakdownSection(visible: Boolean, items: List<IncomeBreakdownItem>) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -377,7 +440,6 @@ private fun BreakdownSection(visible: Boolean) {
 
         Spacer(Modifier.height(20.dp))
 
-        // Card containing bar + legend list
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -385,7 +447,6 @@ private fun BreakdownSection(visible: Boolean) {
                 .background(SurfaceContainerLow)
                 .padding(20.dp)
         ) {
-            // Segmented bar
             val barProgress by animateFloatAsState(
                 targetValue   = if (visible) 1f else 0f,
                 animationSpec = tween(900, delayMillis = 300, easing = FastOutSlowInEasing),
@@ -399,82 +460,88 @@ private fun BreakdownSection(visible: Boolean) {
                     .clip(RoundedCornerShape(100.dp))
             ) {
                 Row(Modifier.fillMaxSize()) {
-                    Box(
-                        Modifier
-                            .fillMaxHeight()
-                            .weight(0.68f * barProgress + 0.001f)
-                            .background(SalaryDot)
-                    )
-                    Box(
-                        Modifier
-                            .fillMaxHeight()
-                            .weight(0.24f * barProgress + 0.001f)
-                            .background(FreelanceDot)
-                    )
-                    Box(
-                        Modifier
-                            .fillMaxHeight()
-                            .weight(0.08f * barProgress + 0.001f)
-                            .background(InvestmentDot)
-                    )
-                    if (barProgress < 1f) {
+                    if (items.isEmpty()) {
                         Box(
-                            Modifier
-                                .fillMaxHeight()
-                                .weight(1f - barProgress)
-                                .background(SurfaceContainerHigh)
+                            Modifier.fillMaxSize().background(SurfaceContainerHigh)
                         )
+                    } else {
+                        items.forEach { item ->
+                            if (item.fraction > 0f) {
+                                Box(
+                                    Modifier
+                                        .fillMaxHeight()
+                                        .weight(item.fraction * barProgress + 0.001f)
+                                        .background(item.color)
+                                )
+                            }
+                        }
+                        if (barProgress < 1f) {
+                            Box(
+                                Modifier
+                                    .fillMaxHeight()
+                                    .weight(1f - barProgress)
+                                    .background(SurfaceContainerHigh)
+                            )
+                        }
                     }
                 }
             }
 
             Spacer(Modifier.height(20.dp))
 
-            // Legend list — dot, label, amount (percent)
-            dummyBreakdown.forEachIndexed { index, item ->
-                val itemAlpha by animateFloatAsState(
-                    targetValue   = if (visible) 1f else 0f,
-                    animationSpec = tween(300, delayMillis = 400 + index * 80),
-                    label         = "breakdown_item_$index"
+            if (items.isEmpty()) {
+                 Text(
+                    text = "No breakdown available.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = OnSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp)
                 )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .graphicsLayer { alpha = itemAlpha }
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment     = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(item.color, CircleShape)
-                        )
-                        Text(
-                            text  = item.label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = OnSurface
-                        )
-                    }
-                    Text(
-                        text  = "$${"%.2f".format(item.amount)} (${item.percent}%)",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = OnSurfaceVariant
+            } else {
+                items.forEachIndexed { index, item ->
+                    val itemAlpha by animateFloatAsState(
+                        targetValue   = if (visible) 1f else 0f,
+                        animationSpec = tween(300, delayMillis = 400 + index * 80),
+                        label         = "breakdown_item_$index"
                     )
-                }
 
-                if (index < dummyBreakdown.lastIndex) {
-                    Box(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(1.dp)
-                            .background(Divider)
-                    )
+                            .graphicsLayer { alpha = itemAlpha }
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment     = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment     = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(item.color, CircleShape)
+                            )
+                            Text(
+                                text  = item.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = OnSurface
+                            )
+                        }
+                        Text(
+                            text  = "$${"%.2f".format(item.amount)} (${item.percent}%)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = OnSurfaceVariant
+                        )
+                    }
+
+                    if (index < items.lastIndex) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(Divider)
+                        )
+                    }
                 }
             }
         }
@@ -526,12 +593,4 @@ private fun IncomeFab(
             )
         }
     }
-}
-
-// ── Preview ────────────────────────────────────────────────────
-
-@Preview(showBackground = true, backgroundColor = 0xFF13131A)
-@Composable
-fun IncomeScreenPreview() {
-    com.example.aurafarm2.core.theme.AppTheme { IncomeScreen() }
 }
