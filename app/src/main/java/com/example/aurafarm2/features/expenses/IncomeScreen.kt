@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -29,6 +30,8 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
 
 // ── Models ─────────────────────────────────────────────────
@@ -48,6 +51,14 @@ data class IncomeBreakdownItem(
     val percent: Int,
     val color: Color,
     val fraction: Float
+)
+
+data class RecentIncomeEntry(
+    val id: String,
+    val source: String,
+    val tag: String,
+    val amount: Double,
+    val date: String
 )
 
 // ── Root screen ────────────────────────────────────────────────
@@ -85,6 +96,17 @@ fun IncomeScreen() {
         IncomeBreakdownItem(it.name, it.amount, it.percent, it.color, it.percent / 100f)
     }
 
+    val recentIncomeEntries = incomes.sortedByDescending { it.dateEpochDay }.take(10).map { entry ->
+        RecentIncomeEntry(
+            id = entry.id,
+            source = entry.source,
+            tag = entry.tag,
+            amount = entry.amount,
+            date = LocalDate.ofEpochDay(entry.dateEpochDay)
+                .format(DateTimeFormatter.ofPattern("dd-MMM-yy", Locale.ENGLISH))
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -107,7 +129,21 @@ fun IncomeScreen() {
 
             Spacer(Modifier.height(48.dp))
 
-            AnimatedIncomeSection(visible, 240) { BreakdownSection(visible, breakdownItems) }
+            AnimatedIncomeSection(visible, 240) {
+                RecentIncomeSection(
+                    visible = visible,
+                    entries = recentIncomeEntries,
+                    onDelete = { entryId ->
+                        coroutineScope.launch {
+                            deleteIncomeEntry(context, entryId)
+                        }
+                    }
+                )
+            }
+
+            Spacer(Modifier.height(48.dp))
+
+            AnimatedIncomeSection(visible, 320) { BreakdownSection(visible, breakdownItems) }
 
             Spacer(Modifier.height(100.dp))
         }
@@ -243,7 +279,10 @@ fun AddIncomeBottomSheet(
 
             // Date Field (Clickable)
             val formattedDate = remember(selectedDateMillis) {
-                Instant.ofEpochMilli(selectedDateMillis).atZone(ZoneId.of("UTC")).toLocalDate().toString()
+                Instant.ofEpochMilli(selectedDateMillis)
+                    .atZone(ZoneId.of("UTC"))
+                    .toLocalDate()
+                    .format(DateTimeFormatter.ofPattern("dd-MMM-yy", Locale.ENGLISH))
             }
             OutlinedTextField(
                 value = formattedDate,
@@ -343,20 +382,7 @@ private fun IncomeTopBar() {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment     = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(SurfaceContainerHigh),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector        = Icons.Outlined.Person,
-                contentDescription = null,
-                tint               = OnSurfaceVariant,
-                modifier           = Modifier.size(20.dp)
-            )
-        }
+        Spacer(Modifier.size(36.dp))
 
         Text(
             text  = "Focus",
@@ -364,14 +390,7 @@ private fun IncomeTopBar() {
             color = Primary
         )
 
-        IconButton(onClick = {}) {
-            Icon(
-                imageVector        = Icons.Outlined.Settings,
-                contentDescription = "Settings",
-                tint               = OnSurfaceVariant,
-                modifier           = Modifier.size(22.dp)
-            )
-        }
+        Spacer(Modifier.size(36.dp))
     }
 }
 
@@ -531,6 +550,115 @@ private fun IncomeStreamCard(source: IncomeSource) {
 }
 
 // ── Breakdown section ──────────────────────────────────────────
+
+@Composable
+private fun RecentIncomeSection(
+    visible: Boolean,
+    entries: List<RecentIncomeEntry>,
+    onDelete: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+    ) {
+        Text(
+            text = "Recent Income",
+            style = MaterialTheme.typography.headlineLarge,
+            color = OnSurface
+        )
+
+        Spacer(Modifier.height(20.dp))
+
+        if (entries.isEmpty()) {
+            Text(
+                text = "No income entries yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = OnSurfaceVariant,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+        } else {
+            entries.forEachIndexed { index, entry ->
+                val rowAlpha by animateFloatAsState(
+                    targetValue = if (visible) 1f else 0f,
+                    animationSpec = tween(300, delayMillis = 300 + index * 70),
+                    label = "income_entry_alpha_$index"
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer { alpha = rowAlpha }
+                        .padding(vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(SurfaceContainerHigh),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Payments,
+                                contentDescription = null,
+                                tint = Primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        Column {
+                            Text(
+                                text = entry.source,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = OnSurface
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "${entry.tag} • ${entry.date}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "+$${"%.2f".format(entry.amount)}",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = OnSurface
+                        )
+                        IconButton(onClick = { onDelete(entry.id) }) {
+                            Icon(
+                                imageVector = Icons.Outlined.Delete,
+                                contentDescription = "Delete income",
+                                tint = Error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (index < entries.lastIndex) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Divider)
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun BreakdownSection(visible: Boolean, items: List<IncomeBreakdownItem>) {

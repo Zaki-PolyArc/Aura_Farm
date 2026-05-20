@@ -50,6 +50,13 @@ suspend fun saveExpenseEntry(context: Context, entry: ExpenseEntry) {
     }
 }
 
+suspend fun deleteExpenseEntry(context: Context, entryId: String) {
+    context.expenseDataStore.edit { prefs ->
+        val current = decodeExpenseEntries(prefs[EXPENSE_ENTRIES_KEY] ?: "[]")
+        prefs[EXPENSE_ENTRIES_KEY] = encodeExpenseEntries(current.filterNot { it.id == entryId })
+    }
+}
+
 fun encodeExpenseEntries(entries: List<ExpenseEntry>): String {
     val array = JSONArray()
     entries.forEach { entry ->
@@ -96,6 +103,13 @@ suspend fun saveIncomeEntry(context: Context, entry: IncomeEntry) {
     context.incomeDataStore.edit { prefs ->
         val current = decodeIncomeEntries(prefs[INCOME_ENTRIES_KEY] ?: "[]")
         prefs[INCOME_ENTRIES_KEY] = encodeIncomeEntries(current + entry)
+    }
+}
+
+suspend fun deleteIncomeEntry(context: Context, entryId: String) {
+    context.incomeDataStore.edit { prefs ->
+        val current = decodeIncomeEntries(prefs[INCOME_ENTRIES_KEY] ?: "[]")
+        prefs[INCOME_ENTRIES_KEY] = encodeIncomeEntries(current.filterNot { it.id == entryId })
     }
 }
 

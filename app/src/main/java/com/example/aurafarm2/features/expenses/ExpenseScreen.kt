@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -29,13 +30,14 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.TextStyle
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
 
 // ── Models ─────────────────────────────────────────────────
 
 data class Transaction(
+    val id: String,
     val icon: ImageVector,
     val name: String,
     val category: String,
@@ -104,9 +106,10 @@ fun ExpenseScreen() {
         val icon = categoryIcons[entry.tag] ?: Icons.Outlined.ShoppingBag
         
         val date = LocalDate.ofEpochDay(entry.dateEpochDay)
-        val dateStr = "${date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())} ${date.dayOfMonth}"
+        val dateStr = date.format(DateTimeFormatter.ofPattern("dd-MMM-yy", Locale.ENGLISH))
         
         Transaction(
+            id = entry.id,
             icon = icon,
             name = entry.name,
             category = entry.tag,
@@ -138,7 +141,17 @@ fun ExpenseScreen() {
 
             Spacer(Modifier.height(48.dp))
 
-            AnimatedSection(visible, 260) { RecentActivitySection(visible, transactions) }
+            AnimatedSection(visible, 260) {
+                RecentActivitySection(
+                    visible = visible,
+                    transactions = transactions,
+                    onDelete = { entryId ->
+                        coroutineScope.launch {
+                            deleteExpenseEntry(context, entryId)
+                        }
+                    }
+                )
+            }
 
             Spacer(Modifier.height(100.dp))
         }
@@ -273,7 +286,10 @@ fun AddExpenseBottomSheet(
 
             // Date Field (Clickable)
             val formattedDate = remember(selectedDateMillis) {
-                Instant.ofEpochMilli(selectedDateMillis).atZone(ZoneId.of("UTC")).toLocalDate().toString()
+                Instant.ofEpochMilli(selectedDateMillis)
+                    .atZone(ZoneId.of("UTC"))
+                    .toLocalDate()
+                    .format(DateTimeFormatter.ofPattern("dd-MMM-yy", Locale.ENGLISH))
             }
             OutlinedTextField(
                 value = formattedDate,
@@ -373,20 +389,7 @@ private fun ExpenseTopBar() {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment     = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(SurfaceContainerHigh),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector        = Icons.Outlined.Person,
-                contentDescription = null,
-                tint               = OnSurfaceVariant,
-                modifier           = Modifier.size(20.dp)
-            )
-        }
+        Spacer(Modifier.size(36.dp))
 
         Text(
             text  = "Focus",
@@ -394,14 +397,7 @@ private fun ExpenseTopBar() {
             color = Primary
         )
 
-        IconButton(onClick = {}) {
-            Icon(
-                imageVector        = Icons.Outlined.Settings,
-                contentDescription = "Settings",
-                tint               = OnSurfaceVariant,
-                modifier           = Modifier.size(22.dp)
-            )
-        }
+        Spacer(Modifier.size(36.dp))
     }
 }
 
@@ -576,7 +572,11 @@ private fun AllocationLegendItem(alloc: AllocationCategory) {
 // ── Recent Activity ────────────────────────────────────────────
 
 @Composable
-private fun RecentActivitySection(visible: Boolean, transactions: List<Transaction>) {
+private fun RecentActivitySection(
+    visible: Boolean,
+    transactions: List<Transaction>,
+    onDelete: (String) -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -626,7 +626,7 @@ private fun RecentActivitySection(visible: Boolean, transactions: List<Transacti
                         alpha        = rowAlpha
                     }
                 ) {
-                    TransactionRow(tx)
+                    TransactionRow(tx = tx, onDelete = onDelete)
                 }
 
                 if (index < transactions.lastIndex) {
@@ -643,7 +643,7 @@ private fun RecentActivitySection(visible: Boolean, transactions: List<Transacti
 }
 
 @Composable
-private fun TransactionRow(tx: Transaction) {
+private fun TransactionRow(tx: Transaction, onDelete: (String) -> Unit) {
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue   = if (pressed) 0.97f else 1f,
@@ -694,11 +694,24 @@ private fun TransactionRow(tx: Transaction) {
             }
         }
 
-        Text(
-            text  = "-$${"%.2f".format(tx.amount)}",
-            style = MaterialTheme.typography.titleSmall,
-            color = OnSurface
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text  = "-$${"%.2f".format(tx.amount)}",
+                style = MaterialTheme.typography.titleSmall,
+                color = OnSurface
+            )
+            IconButton(onClick = { onDelete(tx.id) }) {
+                Icon(
+                    imageVector = Icons.Outlined.Delete,
+                    contentDescription = "Delete expense",
+                    tint = Error,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
     }
 }
 
