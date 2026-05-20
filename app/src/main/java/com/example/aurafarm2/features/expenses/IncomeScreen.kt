@@ -70,6 +70,8 @@ fun IncomeScreen() {
     val coroutineScope = rememberCoroutineScope()
     
     val incomes by remember { incomeEntriesFlow(context) }.collectAsState(initial = emptyList())
+    val settings by remember { appSettingsFlow(context) }.collectAsState(initial = AppSettings())
+    val symbol = currencySymbol(settings.currency)
     var showAddSheet by remember { mutableStateOf(false) }
 
     var visible by remember { mutableStateOf(false) }
@@ -121,11 +123,11 @@ fun IncomeScreen() {
 
             Spacer(Modifier.height(24.dp))
 
-            AnimatedIncomeSection(visible, 80)  { IncomeHeroSection(visible, totalIncome) }
+            AnimatedIncomeSection(visible, 80)  { IncomeHeroSection(visible, totalIncome, symbol) }
 
             Spacer(Modifier.height(48.dp))
 
-            AnimatedIncomeSection(visible, 160) { IncomeStreamsSection(visible, incomeSources) }
+            AnimatedIncomeSection(visible, 160) { IncomeStreamsSection(visible, incomeSources, symbol) }
 
             Spacer(Modifier.height(48.dp))
 
@@ -133,6 +135,7 @@ fun IncomeScreen() {
                 RecentIncomeSection(
                     visible = visible,
                     entries = recentIncomeEntries,
+                    currencySymbol = symbol,
                     onDelete = { entryId ->
                         coroutineScope.launch {
                             deleteIncomeEntry(context, entryId)
@@ -143,7 +146,7 @@ fun IncomeScreen() {
 
             Spacer(Modifier.height(48.dp))
 
-            AnimatedIncomeSection(visible, 320) { BreakdownSection(visible, breakdownItems) }
+            AnimatedIncomeSection(visible, 320) { BreakdownSection(visible, breakdownItems, symbol) }
 
             Spacer(Modifier.height(100.dp))
         }
@@ -397,7 +400,7 @@ private fun IncomeTopBar() {
 // ── Hero ───────────────────────────────────────────────────────
 
 @Composable
-private fun IncomeHeroSection(visible: Boolean, totalIncome: Double) {
+private fun IncomeHeroSection(visible: Boolean, totalIncome: Double, currencySymbol: String) {
     Column(
         modifier            = Modifier
             .fillMaxWidth()
@@ -420,7 +423,7 @@ private fun IncomeHeroSection(visible: Boolean, totalIncome: Double) {
             label         = "income_hero_count"
         )
         Text(
-            text      = "$${"%.2f".format(animVal)}",
+            text      = "$currencySymbol${"%.2f".format(animVal)}",
             style     = MaterialTheme.typography.displayLarge,
             color     = Primary,
             textAlign = TextAlign.Center
@@ -431,7 +434,11 @@ private fun IncomeHeroSection(visible: Boolean, totalIncome: Double) {
 // ── Income Streams section ─────────────────────────────────────
 
 @Composable
-private fun IncomeStreamsSection(visible: Boolean, sources: List<IncomeSource>) {
+private fun IncomeStreamsSection(
+    visible: Boolean,
+    sources: List<IncomeSource>,
+    currencySymbol: String
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -471,7 +478,7 @@ private fun IncomeStreamsSection(visible: Boolean, sources: List<IncomeSource>) 
                         translationY = cardOffset.dp.toPx()
                     }
                 ) {
-                    IncomeStreamCard(source = source)
+                    IncomeStreamCard(source = source, currencySymbol = currencySymbol)
                 }
 
                 if (index < sources.lastIndex) {
@@ -483,7 +490,7 @@ private fun IncomeStreamsSection(visible: Boolean, sources: List<IncomeSource>) 
 }
 
 @Composable
-private fun IncomeStreamCard(source: IncomeSource) {
+private fun IncomeStreamCard(source: IncomeSource, currencySymbol: String) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -542,7 +549,7 @@ private fun IncomeStreamCard(source: IncomeSource) {
         Spacer(Modifier.height(12.dp))
 
         Text(
-            text  = "$${"%.2f".format(source.amount)}",
+            text  = "$currencySymbol${"%.2f".format(source.amount)}",
             style = MaterialTheme.typography.titleLarge,
             color = OnSurface
         )
@@ -555,6 +562,7 @@ private fun IncomeStreamCard(source: IncomeSource) {
 private fun RecentIncomeSection(
     visible: Boolean,
     entries: List<RecentIncomeEntry>,
+    currencySymbol: String,
     onDelete: (String) -> Unit
 ) {
     Column(
@@ -632,7 +640,7 @@ private fun RecentIncomeSection(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "+$${"%.2f".format(entry.amount)}",
+                            text = "+$currencySymbol${"%.2f".format(entry.amount)}",
                             style = MaterialTheme.typography.titleSmall,
                             color = OnSurface
                         )
@@ -661,7 +669,11 @@ private fun RecentIncomeSection(
 }
 
 @Composable
-private fun BreakdownSection(visible: Boolean, items: List<IncomeBreakdownItem>) {
+private fun BreakdownSection(
+    visible: Boolean,
+    items: List<IncomeBreakdownItem>,
+    currencySymbol: String
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -763,7 +775,7 @@ private fun BreakdownSection(visible: Boolean, items: List<IncomeBreakdownItem>)
                             )
                         }
                         Text(
-                            text  = "$${"%.2f".format(item.amount)} (${item.percent}%)",
+                            text  = "$currencySymbol${"%.2f".format(item.amount)} (${item.percent}%)",
                             style = MaterialTheme.typography.bodyMedium,
                             color = OnSurfaceVariant
                         )

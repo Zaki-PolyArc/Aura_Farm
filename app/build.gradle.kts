@@ -87,5 +87,8 @@ dependencies {
     // Lottie
     implementation(libs.lottie.compose)
 
+    // Security
+    implementation(libs.androidx.biometric)
+
     debugImplementation(libs.androidx.ui.tooling)
 }

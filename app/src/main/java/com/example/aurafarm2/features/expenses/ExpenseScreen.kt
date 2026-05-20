@@ -63,6 +63,8 @@ fun ExpenseScreen() {
     
     val expenses by remember { expenseEntriesFlow(context) }.collectAsState(initial = emptyList())
     val incomes by remember { incomeEntriesFlow(context) }.collectAsState(initial = emptyList())
+    val settings by remember { appSettingsFlow(context) }.collectAsState(initial = AppSettings())
+    val symbol = currencySymbol(settings.currency)
     
     var showAddSheet by remember { mutableStateOf(false) }
     var visible by remember { mutableStateOf(false) }
@@ -133,11 +135,11 @@ fun ExpenseScreen() {
 
             Spacer(Modifier.height(24.dp))
 
-            AnimatedSection(visible, 80) { ExpenseHeroSection(visible, netBalance) }
+            AnimatedSection(visible, 80) { ExpenseHeroSection(visible, netBalance, symbol) }
 
             Spacer(Modifier.height(48.dp))
 
-            AnimatedSection(visible, 180) { AllocationSection(visible, totalExpenses, allocations) }
+            AnimatedSection(visible, 180) { AllocationSection(visible, totalExpenses, allocations, symbol) }
 
             Spacer(Modifier.height(48.dp))
 
@@ -145,6 +147,7 @@ fun ExpenseScreen() {
                 RecentActivitySection(
                     visible = visible,
                     transactions = transactions,
+                    currencySymbol = symbol,
                     onDelete = { entryId ->
                         coroutineScope.launch {
                             deleteExpenseEntry(context, entryId)
@@ -404,7 +407,7 @@ private fun ExpenseTopBar() {
 // ── Hero section ───────────────────────────────────────────────
 
 @Composable
-private fun ExpenseHeroSection(visible: Boolean, netBalance: Double) {
+private fun ExpenseHeroSection(visible: Boolean, netBalance: Double, currencySymbol: String) {
     Column(
         modifier            = Modifier
             .fillMaxWidth()
@@ -429,7 +432,7 @@ private fun ExpenseHeroSection(visible: Boolean, netBalance: Double) {
         val colorVal = if (animVal >= 0) Primary else Error
         
         Text(
-            text      = "$sign$${"%.2f".format(Math.abs(animVal))}",
+            text      = "$sign$currencySymbol${"%.2f".format(Math.abs(animVal))}",
             style     = MaterialTheme.typography.displayLarge,
             color     = colorVal,
             textAlign = TextAlign.Center
@@ -450,7 +453,12 @@ private fun ExpenseHeroSection(visible: Boolean, netBalance: Double) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AllocationSection(visible: Boolean, totalExpenses: Double, allocations: List<AllocationCategory>) {
+private fun AllocationSection(
+    visible: Boolean,
+    totalExpenses: Double,
+    allocations: List<AllocationCategory>,
+    currencySymbol: String
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -467,7 +475,7 @@ private fun AllocationSection(visible: Boolean, totalExpenses: Double, allocatio
                 color = OnSurface
             )
             Text(
-                text  = "Total Exp: $${"%.0f".format(totalExpenses)}",
+                text  = "Total Exp: $currencySymbol${"%.0f".format(totalExpenses)}",
                 style = MaterialTheme.typography.labelMedium,
                 color = OnSurfaceVariant
             )
@@ -575,6 +583,7 @@ private fun AllocationLegendItem(alloc: AllocationCategory) {
 private fun RecentActivitySection(
     visible: Boolean,
     transactions: List<Transaction>,
+    currencySymbol: String,
     onDelete: (String) -> Unit
 ) {
     Column(
@@ -626,7 +635,7 @@ private fun RecentActivitySection(
                         alpha        = rowAlpha
                     }
                 ) {
-                    TransactionRow(tx = tx, onDelete = onDelete)
+                    TransactionRow(tx = tx, currencySymbol = currencySymbol, onDelete = onDelete)
                 }
 
                 if (index < transactions.lastIndex) {
@@ -643,7 +652,11 @@ private fun RecentActivitySection(
 }
 
 @Composable
-private fun TransactionRow(tx: Transaction, onDelete: (String) -> Unit) {
+private fun TransactionRow(
+    tx: Transaction,
+    currencySymbol: String,
+    onDelete: (String) -> Unit
+) {
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue   = if (pressed) 0.97f else 1f,
@@ -699,7 +712,7 @@ private fun TransactionRow(tx: Transaction, onDelete: (String) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text  = "-$${"%.2f".format(tx.amount)}",
+                text  = "-$currencySymbol${"%.2f".format(tx.amount)}",
                 style = MaterialTheme.typography.titleSmall,
                 color = OnSurface
             )

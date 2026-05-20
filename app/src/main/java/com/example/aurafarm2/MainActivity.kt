@@ -1,9 +1,9 @@
 package com.example.aurafarm2
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.fragment.app.FragmentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,7 +21,7 @@ import com.example.aurafarm2.features.expenses.ExpenseScreen
 import com.example.aurafarm2.features.expenses.IncomeScreen
 import com.example.aurafarm2.features.expenses.SettingsScreen
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
