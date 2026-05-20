@@ -1,8 +1,15 @@
 package com.example.aurafarm2
 
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -25,11 +32,43 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        createReminderChannel()
+        requestNotificationPermission()
         setContent {
             AppTheme { MainShell() }
         }
     }
+
+    private fun createReminderChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(
+            REMINDER_CHANNEL_ID,
+            "Finance reminders",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Manual reminders for Aura Farm"
+        }
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                42
+            )
+        }
+    }
 }
+
+const val REMINDER_CHANNEL_ID = "finance_reminders"
 
 // ── Nav item model ─────────────────────────────────────────────
 

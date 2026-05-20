@@ -70,6 +70,8 @@ fun IncomeScreen() {
     val coroutineScope = rememberCoroutineScope()
     
     val incomes by remember { incomeEntriesFlow(context) }.collectAsState(initial = emptyList())
+    val expenses by remember { expenseEntriesFlow(context) }.collectAsState(initial = emptyList())
+    val recurringEntries by remember { recurringEntriesFlow(context) }.collectAsState(initial = emptyList())
     val settings by remember { appSettingsFlow(context) }.collectAsState(initial = AppSettings())
     val symbol = currencySymbol(settings.currency)
     var showAddSheet by remember { mutableStateOf(false) }
@@ -109,6 +111,10 @@ fun IncomeScreen() {
         )
     }
 
+    val dueIncomeEntries = recurringEntries
+        .filter { it.enabled && it.kind == "Income" && it.nextDueEpochDay <= LocalDate.now().plusDays(7).toEpochDay() }
+        .sortedBy { it.nextDueEpochDay }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -132,6 +138,33 @@ fun IncomeScreen() {
             Spacer(Modifier.height(48.dp))
 
             AnimatedIncomeSection(visible, 240) {
+                DueRecurringIncomeSection(
+                    entries = dueIncomeEntries,
+                    currencySymbol = symbol,
+                    onAddNow = { recurring ->
+                        coroutineScope.launch {
+                            saveIncomeEntry(
+                                context,
+                                IncomeEntry(
+                                    id = UUID.randomUUID().toString(),
+                                    source = recurring.name,
+                                    tag = recurring.category,
+                                    amount = recurring.amount,
+                                    dateEpochDay = LocalDate.now().toEpochDay()
+                                )
+                            )
+                            saveRecurringEntry(
+                                context,
+                                recurring.copy(nextDueEpochDay = nextRecurringDue(recurring).toEpochDay())
+                            )
+                        }
+                    }
+                )
+            }
+
+            Spacer(Modifier.height(48.dp))
+
+            AnimatedIncomeSection(visible, 320) {
                 RecentIncomeSection(
                     visible = visible,
                     entries = recentIncomeEntries,
@@ -146,7 +179,17 @@ fun IncomeScreen() {
 
             Spacer(Modifier.height(48.dp))
 
-            AnimatedIncomeSection(visible, 320) { BreakdownSection(visible, breakdownItems, symbol) }
+            AnimatedIncomeSection(visible, 400) { BreakdownSection(visible, breakdownItems, symbol) }
+
+            Spacer(Modifier.height(48.dp))
+
+            AnimatedIncomeSection(visible, 480) {
+                ReviewSection(
+                    incomes = incomes,
+                    expenses = expenses,
+                    currencySymbol = symbol
+                )
+            }
 
             Spacer(Modifier.height(100.dp))
         }
@@ -397,6 +440,15 @@ private fun IncomeTopBar() {
     }
 }
 
+private fun nextRecurringDue(entry: RecurringEntry): LocalDate {
+    val base = LocalDate.ofEpochDay(entry.nextDueEpochDay)
+    return when (entry.repeat) {
+        "Weekly" -> base.plusWeeks(1)
+        "Yearly" -> base.plusYears(1)
+        else -> base.plusMonths(1)
+    }
+}
+
 // ── Hero ───────────────────────────────────────────────────────
 
 @Composable
@@ -557,6 +609,47 @@ private fun IncomeStreamCard(source: IncomeSource, currencySymbol: String) {
 }
 
 // ── Breakdown section ──────────────────────────────────────────
+
+@Composable
+private fun DueRecurringIncomeSection(
+    entries: List<RecurringEntry>,
+    currencySymbol: String,
+    onAddNow: (RecurringEntry) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+    ) {
+        Text("Due Soon", style = MaterialTheme.typography.headlineLarge, color = OnSurface)
+        Spacer(Modifier.height(16.dp))
+        if (entries.isEmpty()) {
+            Text("No recurring income due soon.", style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
+        } else {
+            entries.forEach { entry ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(entry.name, style = MaterialTheme.typography.titleMedium, color = OnSurface)
+                        Text(
+                            "${entry.category} • ${LocalDate.ofEpochDay(entry.nextDueEpochDay).format(DateTimeFormatter.ofPattern("dd-MMM-yy", Locale.ENGLISH))}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = { onAddNow(entry) }) {
+                        Text("Add $currencySymbol${"%.0f".format(entry.amount)}", color = Primary)
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun RecentIncomeSection(
@@ -796,6 +889,63 @@ private fun BreakdownSection(
 }
 
 // ── FAB ────────────────────────────────────────────────────────
+
+@Composable
+private fun ReviewSection(
+    incomes: List<IncomeEntry>,
+    expenses: List<ExpenseEntry>,
+    currencySymbol: String
+) {
+    val now = LocalDate.now()
+    val weekStart = now.minusDays(6).toEpochDay()
+    val monthStart = now.withDayOfMonth(1).toEpochDay()
+    val weeklyIncome = incomes.filter { it.dateEpochDay >= weekStart }.sumOf { it.amount }
+    val weeklyExpenses = expenses.filter { it.dateEpochDay >= weekStart }.sumOf { it.amount }
+    val monthlyIncome = incomes.filter { it.dateEpochDay >= monthStart }.sumOf { it.amount }
+    val monthlyExpenses = expenses.filter { it.dateEpochDay >= monthStart }.sumOf { it.amount }
+    val topExpense = expenses
+        .filter { it.dateEpochDay >= monthStart }
+        .groupBy { it.tag }
+        .maxByOrNull { it.value.sumOf { entry -> entry.amount } }
+        ?.key ?: "None"
+    val topIncome = incomes
+        .filter { it.dateEpochDay >= monthStart }
+        .groupBy { it.source }
+        .maxByOrNull { it.value.sumOf { entry -> entry.amount } }
+        ?.key ?: "None"
+    val savingsRate = if (monthlyIncome > 0) (((monthlyIncome - monthlyExpenses) / monthlyIncome) * 100).toInt() else 0
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(SurfaceContainerLow)
+            .padding(20.dp)
+    ) {
+        Text("Review", style = MaterialTheme.typography.headlineLarge, color = OnSurface)
+        Spacer(Modifier.height(16.dp))
+        ReviewLine("Last 7 days", "$currencySymbol${"%.0f".format(weeklyIncome - weeklyExpenses)}")
+        ReviewLine("This month", "$currencySymbol${"%.0f".format(monthlyIncome - monthlyExpenses)}")
+        ReviewLine("Top expense", topExpense)
+        ReviewLine("Top income", topIncome)
+        ReviewLine("Savings rate", "$savingsRate%")
+    }
+}
+
+@Composable
+private fun ReviewLine(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = OnSurface)
+    }
+}
 
 @Composable
 private fun IncomeFab(

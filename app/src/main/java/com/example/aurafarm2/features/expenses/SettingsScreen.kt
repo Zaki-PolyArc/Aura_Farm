@@ -27,6 +27,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -34,6 +37,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -63,18 +67,30 @@ import com.example.aurafarm2.core.theme.SurfaceContainerHigh
 import com.example.aurafarm2.core.theme.SurfaceContainerLow
 import com.example.aurafarm2.core.theme.SurfaceVariant
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import java.util.UUID
 
 @Composable
 fun SettingsScreen() {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val settings by remember { appSettingsFlow(context) }.collectAsState(initial = AppSettings())
+    val reminders by remember { remindersFlow(context) }.collectAsState(initial = emptyList())
+    val budgets by remember { budgetsFlow(context) }.collectAsState(initial = emptyList())
+    val recurringEntries by remember { recurringEntriesFlow(context) }.collectAsState(initial = emptyList())
 
     var visible by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showCurrencyDialog by remember { mutableStateOf(false) }
     var showAppearanceDialog by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
+    var showReminderDialog by remember { mutableStateOf(false) }
+    var showBudgetDialog by remember { mutableStateOf(false) }
+    var showRecurringDialog by remember { mutableStateOf(false) }
     var biometricMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { visible = true }
@@ -109,8 +125,8 @@ fun SettingsScreen() {
                 SettingsDivider()
                 SettingsRow(
                     label = "Notification Settings",
-                    value = "Later",
-                    onClick = {}
+                    value = "${reminders.count { it.enabled }} active",
+                    onClick = { showReminderDialog = true }
                 )
             }
         }
@@ -129,6 +145,24 @@ fun SettingsScreen() {
                     label = "Currency",
                     value = settings.currency,
                     onClick = { showCurrencyDialog = true }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(32.dp))
+
+        AnimatedSettingsSection(visible, 260) {
+            SettingsGroup(label = "FINANCE COACH") {
+                SettingsRow(
+                    label = "Budgets",
+                    value = "${budgets.size} set",
+                    onClick = { showBudgetDialog = true }
+                )
+                SettingsDivider()
+                SettingsRow(
+                    label = "Recurring Entries",
+                    value = "${recurringEntries.count { it.enabled }} active",
+                    onClick = { showRecurringDialog = true }
                 )
             }
         }
@@ -227,6 +261,51 @@ fun SettingsScreen() {
             onSave = {
                 coroutineScope.launch { savePassword(context, it) }
                 showPasswordDialog = false
+            }
+        )
+    }
+
+    if (showReminderDialog) {
+        ReminderManagerDialog(
+            reminders = reminders,
+            onDismiss = { showReminderDialog = false },
+            onSave = { reminder ->
+                coroutineScope.launch {
+                    saveReminder(context, reminder)
+                    scheduleReminder(context, reminder)
+                }
+            },
+            onDelete = { reminder ->
+                coroutineScope.launch {
+                    deleteReminder(context, reminder.id)
+                    cancelReminder(context, reminder.id)
+                }
+            }
+        )
+    }
+
+    if (showBudgetDialog) {
+        BudgetManagerDialog(
+            budgets = budgets,
+            onDismiss = { showBudgetDialog = false },
+            onSave = { budget ->
+                coroutineScope.launch { saveBudget(context, budget) }
+            },
+            onDelete = { budget ->
+                coroutineScope.launch { deleteBudget(context, budget.id) }
+            }
+        )
+    }
+
+    if (showRecurringDialog) {
+        RecurringManagerDialog(
+            entries = recurringEntries,
+            onDismiss = { showRecurringDialog = false },
+            onSave = { entry ->
+                coroutineScope.launch { saveRecurringEntry(context, entry) }
+            },
+            onDelete = { entry ->
+                coroutineScope.launch { deleteRecurringEntry(context, entry.id) }
             }
         )
     }
@@ -520,6 +599,277 @@ private fun ChoiceDialog(
         titleContentColor = OnSurface,
         textContentColor = OnSurfaceVariant
     )
+}
+
+@Composable
+private fun ReminderManagerDialog(
+    reminders: List<Reminder>,
+    onDismiss: () -> Unit,
+    onSave: (Reminder) -> Unit,
+    onDelete: (Reminder) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var type by remember { mutableStateOf("Log expense") }
+    var repeat by remember { mutableStateOf("Once") }
+    var hour by remember { mutableStateOf("9") }
+    var minute by remember { mutableStateOf("00") }
+    var note by remember { mutableStateOf("") }
+    val types = listOf("Log expense", "Log income", "Bill/payment", "Weekly money review")
+    val repeats = listOf("Once", "Daily", "Weekly")
+    val canSave = title.isNotBlank() && hour.toIntOrNull() in 0..23 && minute.toIntOrNull() in 0..59
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Done", color = Primary) } },
+        title = { Text("Notifications") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (reminders.isEmpty()) {
+                    Text("No reminders yet.", style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
+                } else {
+                    reminders.sortedBy { it.title }.forEach { reminder ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(reminder.title, color = OnSurface)
+                                Text(
+                                    "${reminder.type} • %02d:%02d • ${reminder.repeat}".format(reminder.hour, reminder.minute),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = OnSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = reminder.enabled,
+                                onCheckedChange = { onSave(reminder.copy(enabled = it)) }
+                            )
+                            TextButton(onClick = { onDelete(reminder) }) {
+                                Text("Delete", color = Error)
+                            }
+                        }
+                    }
+                }
+
+                SettingsDivider()
+                Text("New reminder", style = MaterialTheme.typography.titleMedium, color = OnSurface)
+                OutlinedTextField(title, { title = it }, label = { Text("Title") }, singleLine = true, colors = fieldColors())
+                ChoiceChips(types, type) { type = it }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(hour, { hour = it }, label = { Text("Hour") }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), colors = fieldColors())
+                    OutlinedTextField(minute, { minute = it }, label = { Text("Minute") }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), colors = fieldColors())
+                }
+                ChoiceChips(repeats, repeat) { repeat = it }
+                OutlinedTextField(note, { note = it }, label = { Text("Note") }, colors = fieldColors())
+                Button(
+                    onClick = {
+                        onSave(
+                            Reminder(
+                                id = UUID.randomUUID().toString(),
+                                title = title,
+                                type = type,
+                                hour = hour.toInt(),
+                                minute = minute.toInt(),
+                                repeat = repeat,
+                                note = note,
+                                enabled = true
+                            )
+                        )
+                        title = ""
+                        note = ""
+                    },
+                    enabled = canSave,
+                    colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary)
+                ) {
+                    Text("Add reminder")
+                }
+            }
+        },
+        containerColor = SurfaceContainerHigh,
+        titleContentColor = OnSurface,
+        textContentColor = OnSurfaceVariant
+    )
+}
+
+@Composable
+private fun BudgetManagerDialog(
+    budgets: List<Budget>,
+    onDismiss: () -> Unit,
+    onSave: (Budget) -> Unit,
+    onDelete: (Budget) -> Unit
+) {
+    var category by remember { mutableStateOf("Food") }
+    var limit by remember { mutableStateOf("") }
+    val categories = listOf("Food", "Transport", "Utilities", "Entertainment", "Shopping", "Health", "Other")
+    val canSave = limit.toDoubleOrNull()?.let { it > 0 } == true
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Done", color = Primary) } },
+        title = { Text("Budgets") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (budgets.isEmpty()) {
+                    Text("No budgets yet.", color = OnSurfaceVariant)
+                } else {
+                    budgets.sortedBy { it.category }.forEach { budget ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("${budget.category}: ${"%.0f".format(budget.limit)}", color = OnSurface)
+                            TextButton(onClick = { onDelete(budget) }) { Text("Delete", color = Error) }
+                        }
+                    }
+                }
+                SettingsDivider()
+                Text("Set monthly limit", style = MaterialTheme.typography.titleMedium, color = OnSurface)
+                ChoiceChips(categories, category) { category = it }
+                OutlinedTextField(limit, { limit = it }, label = { Text("Limit") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), colors = fieldColors())
+                Button(
+                    onClick = {
+                        onSave(Budget(UUID.randomUUID().toString(), category, limit.toDouble()))
+                        limit = ""
+                    },
+                    enabled = canSave,
+                    colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary)
+                ) {
+                    Text("Save budget")
+                }
+            }
+        },
+        containerColor = SurfaceContainerHigh,
+        titleContentColor = OnSurface,
+        textContentColor = OnSurfaceVariant
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RecurringManagerDialog(
+    entries: List<RecurringEntry>,
+    onDismiss: () -> Unit,
+    onSave: (RecurringEntry) -> Unit,
+    onDelete: (RecurringEntry) -> Unit
+) {
+    var kind by remember { mutableStateOf("Expense") }
+    var name by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("Food") }
+    var amount by remember { mutableStateOf("") }
+    var repeat by remember { mutableStateOf("Monthly") }
+    var selectedDateMillis by remember { mutableStateOf(Instant.now().toEpochMilli()) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val expenseCategories = listOf("Food", "Transport", "Utilities", "Entertainment", "Shopping", "Health", "Other")
+    val incomeCategories = listOf("Salary", "Freelance", "Investments", "Gifts", "Other")
+    val categories = if (kind == "Income") incomeCategories else expenseCategories
+    val repeats = listOf("Weekly", "Monthly", "Yearly")
+    val canSave = name.isNotBlank() && amount.toDoubleOrNull()?.let { it > 0 } == true
+    val date = Instant.ofEpochMilli(selectedDateMillis).atZone(ZoneId.of("UTC")).toLocalDate()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Done", color = Primary) } },
+        title = { Text("Recurring Entries") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (entries.isEmpty()) {
+                    Text("No recurring entries yet.", color = OnSurfaceVariant)
+                } else {
+                    entries.sortedBy { it.nextDueEpochDay }.forEach { entry ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(entry.name, color = OnSurface)
+                                Text(
+                                    "${entry.kind} • ${entry.repeat} • ${LocalDate.ofEpochDay(entry.nextDueEpochDay).format(DateTimeFormatter.ofPattern("dd-MMM-yy", Locale.ENGLISH))}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = OnSurfaceVariant
+                                )
+                            }
+                            Switch(checked = entry.enabled, onCheckedChange = { onSave(entry.copy(enabled = it)) })
+                            TextButton(onClick = { onDelete(entry) }) { Text("Delete", color = Error) }
+                        }
+                    }
+                }
+                SettingsDivider()
+                Text("New recurring entry", style = MaterialTheme.typography.titleMedium, color = OnSurface)
+                ChoiceChips(listOf("Expense", "Income"), kind) {
+                    kind = it
+                    category = if (it == "Income") "Salary" else "Food"
+                }
+                OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, colors = fieldColors())
+                ChoiceChips(categories, category) { category = it }
+                OutlinedTextField(amount, { amount = it }, label = { Text("Amount") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), colors = fieldColors())
+                ChoiceChips(repeats, repeat) { repeat = it }
+                TextButton(onClick = { showDatePicker = true }) {
+                    Text("Next due: ${date.format(DateTimeFormatter.ofPattern("dd-MMM-yy", Locale.ENGLISH))}", color = Primary)
+                }
+                Button(
+                    onClick = {
+                        onSave(
+                            RecurringEntry(
+                                id = UUID.randomUUID().toString(),
+                                kind = kind,
+                                name = name,
+                                category = category,
+                                amount = amount.toDouble(),
+                                repeat = repeat,
+                                nextDueEpochDay = date.toEpochDay(),
+                                enabled = true
+                            )
+                        )
+                        name = ""
+                        amount = ""
+                    },
+                    enabled = canSave,
+                    colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary)
+                ) {
+                    Text("Add recurring entry")
+                }
+            }
+        },
+        containerColor = SurfaceContainerHigh,
+        titleContentColor = OnSurface,
+        textContentColor = OnSurfaceVariant
+    )
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDateMillis)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { selectedDateMillis = it }
+                    showDatePicker = false
+                }) { Text("OK", color = Primary) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel", color = OnSurfaceVariant)
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+}
+
+@Composable
+private fun ChoiceChips(options: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Column {
+        options.chunked(2).forEach { rowOptions ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowOptions.forEach { option ->
+                    TextButton(onClick = { onSelect(option) }) {
+                        Text(
+                            option,
+                            color = if (option == selected) Primary else OnSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

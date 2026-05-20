@@ -50,7 +50,9 @@ data class AllocationCategory(
     val label: String,
     val percent: Int,
     val color: Color,
-    val fraction: Float
+    val fraction: Float,
+    val spent: Double,
+    val limit: Double?
 )
 
 // ── Root screen ────────────────────────────────────────────────
@@ -63,6 +65,8 @@ fun ExpenseScreen() {
     
     val expenses by remember { expenseEntriesFlow(context) }.collectAsState(initial = emptyList())
     val incomes by remember { incomeEntriesFlow(context) }.collectAsState(initial = emptyList())
+    val budgets by remember { budgetsFlow(context) }.collectAsState(initial = emptyList())
+    val recurringEntries by remember { recurringEntriesFlow(context) }.collectAsState(initial = emptyList())
     val settings by remember { appSettingsFlow(context) }.collectAsState(initial = AppSettings())
     val symbol = currencySymbol(settings.currency)
     
@@ -100,8 +104,13 @@ fun ExpenseScreen() {
         val amount = entries.sumOf { it.amount }
         val percent = if (totalExpenses > 0) ((amount / totalExpenses) * 100).toInt() else 0
         val color = categoryColors[tag] ?: Primary
-        AllocationCategory(tag, percent, color, percent / 100f)
+        val limit = budgets.firstOrNull { it.category == tag }?.limit
+        AllocationCategory(tag, percent, color, percent / 100f, amount, limit)
     }.sortedByDescending { it.percent }
+
+    val dueExpenseEntries = recurringEntries
+        .filter { it.enabled && it.kind == "Expense" && it.nextDueEpochDay <= LocalDate.now().plusDays(7).toEpochDay() }
+        .sortedBy { it.nextDueEpochDay }
 
     val transactions = expenses.sortedByDescending { it.dateEpochDay }.take(10).map { entry ->
         val color = categoryColors[entry.tag] ?: Primary
@@ -137,13 +146,52 @@ fun ExpenseScreen() {
 
             AnimatedSection(visible, 80) { ExpenseHeroSection(visible, netBalance, symbol) }
 
+            Spacer(Modifier.height(36.dp))
+
+            AnimatedSection(visible, 140) {
+                CoachSummarySection(
+                    totalIncome = totalIncome,
+                    totalExpenses = totalExpenses,
+                    netBalance = netBalance,
+                    allocations = allocations,
+                    currencySymbol = symbol
+                )
+            }
+
             Spacer(Modifier.height(48.dp))
 
-            AnimatedSection(visible, 180) { AllocationSection(visible, totalExpenses, allocations, symbol) }
+            AnimatedSection(visible, 220) { AllocationSection(visible, totalExpenses, allocations, symbol) }
 
             Spacer(Modifier.height(48.dp))
 
-            AnimatedSection(visible, 260) {
+            AnimatedSection(visible, 300) {
+                DueRecurringExpenseSection(
+                    entries = dueExpenseEntries,
+                    currencySymbol = symbol,
+                    onAddNow = { recurring ->
+                        coroutineScope.launch {
+                            saveExpenseEntry(
+                                context,
+                                ExpenseEntry(
+                                    id = UUID.randomUUID().toString(),
+                                    name = recurring.name,
+                                    tag = recurring.category,
+                                    amount = recurring.amount,
+                                    dateEpochDay = LocalDate.now().toEpochDay()
+                                )
+                            )
+                            saveRecurringEntry(
+                                context,
+                                recurring.copy(nextDueEpochDay = nextRecurringDue(recurring).toEpochDay())
+                            )
+                        }
+                    }
+                )
+            }
+
+            Spacer(Modifier.height(48.dp))
+
+            AnimatedSection(visible, 380) {
                 RecentActivitySection(
                     visible = visible,
                     transactions = transactions,
@@ -451,6 +499,49 @@ private fun ExpenseHeroSection(visible: Boolean, netBalance: Double, currencySym
 
 // ── Allocation section ─────────────────────────────────────────
 
+@Composable
+private fun CoachSummarySection(
+    totalIncome: Double,
+    totalExpenses: Double,
+    netBalance: Double,
+    allocations: List<AllocationCategory>,
+    currencySymbol: String
+) {
+    val topCategory = allocations.maxByOrNull { it.spent }
+    val insight = when {
+        totalExpenses <= 0 -> "Start with one expense entry to unlock useful patterns."
+        topCategory != null -> "${topCategory.label} is your biggest spending category this month."
+        else -> "Your month is still taking shape."
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(SurfaceContainerLow)
+            .padding(20.dp)
+    ) {
+        Text("Finance Coach", style = MaterialTheme.typography.headlineMedium, color = OnSurface)
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
+            CoachMetric("Income", "$currencySymbol${"%.0f".format(totalIncome)}", Modifier.weight(1f))
+            CoachMetric("Spent", "$currencySymbol${"%.0f".format(totalExpenses)}", Modifier.weight(1f))
+            CoachMetric("Left", "$currencySymbol${"%.0f".format(netBalance)}", Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(insight, style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
+    }
+}
+
+@Composable
+private fun CoachMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleMedium, color = OnSurface)
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AllocationSection(
@@ -500,7 +591,7 @@ private fun AllocationSection(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 allocations.forEach { alloc ->
-                    AllocationLegendItem(alloc)
+                    AllocationLegendItem(alloc, currencySymbol)
                 }
             }
         }
@@ -551,7 +642,7 @@ private fun SegmentedAllocationBar(visible: Boolean, allocations: List<Allocatio
 }
 
 @Composable
-private fun AllocationLegendItem(alloc: AllocationCategory) {
+private fun AllocationLegendItem(alloc: AllocationCategory, currencySymbol: String) {
     Column(horizontalAlignment = Alignment.Start) {
         Row(
             verticalAlignment     = Alignment.CenterVertically,
@@ -574,10 +665,59 @@ private fun AllocationLegendItem(alloc: AllocationCategory) {
             style = MaterialTheme.typography.titleMedium,
             color = OnSurface
         )
+        alloc.limit?.let { limit ->
+            val used = if (limit > 0) ((alloc.spent / limit) * 100).toInt() else 0
+            Text(
+                text = "$currencySymbol${"%.0f".format(alloc.spent)} / $currencySymbol${"%.0f".format(limit)} ($used%)",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (alloc.spent > limit) Error else OnSurfaceVariant
+            )
+        }
     }
 }
 
 // ── Recent Activity ────────────────────────────────────────────
+
+@Composable
+private fun DueRecurringExpenseSection(
+    entries: List<RecurringEntry>,
+    currencySymbol: String,
+    onAddNow: (RecurringEntry) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+    ) {
+        Text("Due Soon", style = MaterialTheme.typography.headlineMedium, color = OnSurface)
+        Spacer(Modifier.height(16.dp))
+        if (entries.isEmpty()) {
+            Text("No recurring expenses due soon.", style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
+        } else {
+            entries.forEach { entry ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(entry.name, style = MaterialTheme.typography.titleMedium, color = OnSurface)
+                        Text(
+                            "${entry.category} • ${LocalDate.ofEpochDay(entry.nextDueEpochDay).format(DateTimeFormatter.ofPattern("dd-MMM-yy", Locale.ENGLISH))}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = { onAddNow(entry) }) {
+                        Text("Add $currencySymbol${"%.0f".format(entry.amount)}", color = Primary)
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun RecentActivitySection(
@@ -725,6 +865,15 @@ private fun TransactionRow(
                 )
             }
         }
+    }
+}
+
+private fun nextRecurringDue(entry: RecurringEntry): LocalDate {
+    val base = LocalDate.ofEpochDay(entry.nextDueEpochDay)
+    return when (entry.repeat) {
+        "Weekly" -> base.plusWeeks(1)
+        "Yearly" -> base.plusYears(1)
+        else -> base.plusMonths(1)
     }
 }
 
