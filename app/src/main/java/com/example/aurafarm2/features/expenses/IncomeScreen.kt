@@ -26,7 +26,9 @@ import androidx.compose.ui.unit.sp
 import com.example.aurafarm2.core.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 
 // ── Models ─────────────────────────────────────────────────
@@ -50,13 +52,14 @@ data class IncomeBreakdownItem(
 
 // ── Root screen ────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun IncomeScreen() {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     
     val incomes by remember { incomeEntriesFlow(context) }.collectAsState(initial = emptyList())
-    var showAddDialog by remember { mutableStateOf(false) }
+    var showAddSheet by remember { mutableStateOf(false) }
 
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
@@ -115,7 +118,7 @@ fun IncomeScreen() {
             label         = "income_fab_scale"
         )
         IncomeFab(
-            onClick  = { showAddDialog = true },
+            onClick  = { showAddSheet = true },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 24.dp)
@@ -123,19 +126,19 @@ fun IncomeScreen() {
         )
     }
 
-    if (showAddDialog) {
-        AddIncomeDialog(
-            onDismiss = { showAddDialog = false },
-            onSave = { source, tag, amount ->
+    if (showAddSheet) {
+        AddIncomeBottomSheet(
+            onDismiss = { showAddSheet = false },
+            onSave = { source, tag, amount, epochDay ->
                 coroutineScope.launch {
                     saveIncomeEntry(
                         context,
                         IncomeEntry(
                             id = UUID.randomUUID().toString(),
-                            source = source.ifEmpty { "Other" },
-                            tag = tag.ifEmpty { "General" },
+                            source = source,
+                            tag = tag,
                             amount = amount,
-                            dateEpochDay = LocalDate.now().toEpochDay()
+                            dateEpochDay = epochDay
                         )
                     )
                 }
@@ -144,61 +147,165 @@ fun IncomeScreen() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddIncomeDialog(onDismiss: () -> Unit, onSave: (String, String, Double) -> Unit) {
+fun AddIncomeBottomSheet(
+    onDismiss: () -> Unit,
+    onSave: (String, String, Double, Long) -> Unit
+) {
     var source by remember { mutableStateOf("") }
-    var tag by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     
-    AlertDialog(
+    val tags = listOf("Salary", "Freelance", "Investments", "Gifts", "Other")
+    var expanded by remember { mutableStateOf(false) }
+    var selectedTag by remember { mutableStateOf(tags[0]) }
+
+    val initialMillis = remember { Instant.now().toEpochMilli() }
+    var selectedDateMillis by remember { mutableLongStateOf(initialMillis) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // Validation
+    val isValid = source.isNotBlank() && amount.toDoubleOrNull()?.let { it > 0 } == true
+
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text("Add Income", color = OnSurface) },
-        containerColor = SurfaceContainerHigh,
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        sheetState = sheetState,
+        containerColor = SurfaceContainerHigh
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text("Add Income", style = MaterialTheme.typography.headlineMedium, color = OnSurface)
+
+            OutlinedTextField(
+                value = source,
+                onValueChange = { source = it },
+                label = { Text("Source Name (e.g. Acme Corp)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = OnSurface,
+                    unfocusedTextColor = OnSurface
+                )
+            )
+
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = it },
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 OutlinedTextField(
-                    value = source, 
-                    onValueChange = { source = it }, 
-                    label = { Text("Source (e.g. Salary)") },
+                    value = selectedTag,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Category") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = OnSurface,
                         unfocusedTextColor = OnSurface
                     )
                 )
-                OutlinedTextField(
-                    value = tag, 
-                    onValueChange = { tag = it }, 
-                    label = { Text("Tag (e.g. Work)") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = OnSurface,
-                        unfocusedTextColor = OnSurface
-                    )
-                )
-                OutlinedTextField(
-                    value = amount, 
-                    onValueChange = { amount = it }, 
-                    label = { Text("Amount") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = OnSurface,
-                        unfocusedTextColor = OnSurface
-                    )
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val amt = amount.toDoubleOrNull() ?: 0.0
-                if (amt > 0) {
-                    onSave(source, tag, amt)
-                    onDismiss()
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    tags.forEach { tag ->
+                        DropdownMenuItem(
+                            text = { Text(tag) },
+                            onClick = {
+                                selectedTag = tag
+                                expanded = false
+                            }
+                        )
+                    }
                 }
-            }) { Text("Save", color = Primary) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = OnSurfaceVariant) }
+            }
+
+            OutlinedTextField(
+                value = amount,
+                onValueChange = { amount = it },
+                label = { Text("Amount") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = OnSurface,
+                    unfocusedTextColor = OnSurface
+                )
+            )
+
+            // Date Field (Clickable)
+            val formattedDate = remember(selectedDateMillis) {
+                Instant.ofEpochMilli(selectedDateMillis).atZone(ZoneId.of("UTC")).toLocalDate().toString()
+            }
+            OutlinedTextField(
+                value = formattedDate,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Date") },
+                trailingIcon = {
+                    IconButton(onClick = { showDatePicker = true }) {
+                        Icon(Icons.Outlined.DateRange, contentDescription = "Select Date", tint = OnSurfaceVariant)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = OnSurface,
+                    unfocusedTextColor = OnSurface
+                )
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = {
+                    val amt = amount.toDoubleOrNull() ?: 0.0
+                    val epochDay = Instant.ofEpochMilli(selectedDateMillis).atZone(ZoneId.of("UTC")).toLocalDate().toEpochDay()
+                    onSave(source, selectedTag, amt, epochDay)
+                    onDismiss()
+                },
+                enabled = isValid,
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Primary,
+                    contentColor = OnPrimary,
+                    disabledContainerColor = SurfaceVariant,
+                    disabledContentColor = OnSurfaceVariant
+                )
+            ) {
+                Text("Save Income", style = MaterialTheme.typography.labelLarge)
+            }
         }
-    )
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDateMillis)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { selectedDateMillis = it }
+                    showDatePicker = false
+                }) {
+                    Text("OK", color = Primary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel", color = OnSurfaceVariant)
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 }
 
 // ── Animated wrapper ───────────────────────────────────────────
