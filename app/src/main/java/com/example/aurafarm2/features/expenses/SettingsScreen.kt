@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -24,12 +25,31 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.repeatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.intl.LocaleList
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.KeyboardBackspace
+import kotlinx.coroutines.delay
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -181,16 +201,20 @@ fun SettingsScreen() {
                 BiometricRow(
                     enabled = settings.biometricEnabled,
                     onToggle = { enabled ->
-                        handleBiometricToggle(
-                            context = context,
-                            enable = enabled,
-                            onMessage = { biometricMessage = it },
-                            onVerified = {
-                                coroutineScope.launch {
-                                    saveBiometricEnabled(context, enabled)
+                        if (!settings.hasPassword && enabled) {
+                            biometricMessage = "Please set a Security PIN first to enable Biometrics fallback."
+                        } else {
+                            handleBiometricToggle(
+                                context = context,
+                                enable = enabled,
+                                onMessage = { biometricMessage = it },
+                                onVerified = {
+                                    coroutineScope.launch {
+                                        saveBiometricEnabled(context, enabled)
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
                     }
                 )
             }
@@ -258,6 +282,7 @@ fun SettingsScreen() {
 
     if (showPasswordDialog) {
         PasswordDialog(
+            hasPassword = settings.hasPassword,
             onDismiss = { showPasswordDialog = false },
             onSave = {
                 coroutineScope.launch { savePassword(context, it) }
@@ -907,68 +932,194 @@ private fun ChoiceChips(options: List<String>, selected: String, onSelect: (Stri
 
 @Composable
 private fun PasswordDialog(
+    hasPassword: Boolean,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit
 ) {
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    val isValid = password.length == 6 && password == confirmPassword
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    var currentStep by remember { mutableStateOf(if (hasPassword) "verify" else "new") }
+    var enteredCode by remember { mutableStateOf("") }
+    var tempNewPin by remember { mutableStateOf("") }
+    var isError by remember { mutableStateOf(false) }
+
+    val shakeOffset = remember { Animatable(0f) }
+
+    // Check code when length reaches 6
+    LaunchedEffect(enteredCode) {
+        if (enteredCode.length == 6) {
+            when (currentStep) {
+                "verify" -> {
+                    val isCorrect = verifyPassword(context, enteredCode)
+                    if (isCorrect) {
+                        currentStep = "new"
+                        enteredCode = ""
+                    } else {
+                        isError = true
+                        // Shake animation
+                        val spec = repeatable<Float>(
+                            iterations = 4,
+                            animation = tween(durationMillis = 50, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        )
+                        shakeOffset.animateTo(8f, animationSpec = spec)
+                        shakeOffset.animateTo(0f, animationSpec = spec)
+                        delay(300)
+                        enteredCode = ""
+                        isError = false
+                    }
+                }
+                "new" -> {
+                    tempNewPin = enteredCode
+                    currentStep = "confirm"
+                    enteredCode = ""
+                }
+                "confirm" -> {
+                    if (enteredCode == tempNewPin) {
+                        onSave(enteredCode)
+                    } else {
+                        isError = true
+                        // Shake animation
+                        val spec = repeatable<Float>(
+                            iterations = 4,
+                            animation = tween(durationMillis = 50, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        )
+                        shakeOffset.animateTo(8f, animationSpec = spec)
+                        shakeOffset.animateTo(0f, animationSpec = spec)
+                        delay(300)
+                        enteredCode = ""
+                        isError = false
+                    }
+                }
+            }
+        }
+    }
+
+    val stepTitle = when (currentStep) {
+        "verify" -> "Verify Current PIN"
+        "new" -> "Set Security PIN"
+        else -> "Confirm Security PIN"
+    }
+
+    val stepSubtitle = when (currentStep) {
+        "verify" -> "Enter your current 6-digit PIN to proceed"
+        "new" -> "Enter a new 6-digit Security PIN"
+        else -> "Re-enter your new PIN to confirm"
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = {
-            Button(
-                onClick = { onSave(password) },
-                enabled = isValid,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Primary,
-                    contentColor = OnPrimary,
-                    disabledContainerColor = SurfaceVariant,
-                    disabledContentColor = OnSurfaceVariant
-                )
+        title = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = OnSurfaceVariant)
-            }
-        },
-        title = { Text("Set Security PIN") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { input ->
-                        if (input.all { it.isDigit() } && input.length <= 6) {
-                            password = input
-                        }
-                    },
-                    label = { Text("New 6-digit PIN") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    colors = fieldColors()
-                )
-                OutlinedTextField(
-                    value = confirmPassword,
-                    onValueChange = { input ->
-                        if (input.all { it.isDigit() } && input.length <= 6) {
-                            confirmPassword = input
-                        }
-                    },
-                    label = { Text("Confirm 6-digit PIN") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    colors = fieldColors()
-                )
                 Text(
-                    text = "Enter exactly 6 numeric digits.",
+                    text = stepTitle,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = OnSurface
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stepSubtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = OnSurfaceVariant
                 )
+            }
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // PIN Dots
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .offset(x = shakeOffset.value.dp)
+                        .padding(vertical = 8.dp)
+                ) {
+                    repeat(6) { index ->
+                        val isOccupied = index < enteredCode.length
+                        val dotColor = when {
+                            isError -> Error
+                            isOccupied -> Primary
+                            else -> OnSurfaceVariant.copy(alpha = 0.2f)
+                        }
+                        val scale = if (isOccupied) 1.2f else 1.0f
+                        val animatedScale by animateFloatAsState(
+                            targetValue = scale,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessLow
+                            ),
+                            label = "dialog_dot_scale"
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .graphicsLayer(scaleX = animatedScale, scaleY = animatedScale)
+                                .clip(CircleShape)
+                                .background(dotColor)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isOccupied) Color.Transparent else OnSurfaceVariant.copy(alpha = 0.1f),
+                                    shape = CircleShape
+                                )
+                        )
+                    }
+                }
+
+                // Keypad
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    val keys = listOf(
+                        listOf("1", "2", "3"),
+                        listOf("4", "5", "6"),
+                        listOf("7", "8", "9"),
+                        listOf("", "0", "Delete")
+                    )
+
+                    keys.forEach { row ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            row.forEach { key ->
+                                DialogKeypadButton(
+                                    key = key,
+                                    onClick = {
+                                        if (key == "Delete") {
+                                            if (enteredCode.isNotEmpty()) {
+                                                enteredCode = enteredCode.dropLast(1)
+                                            }
+                                        } else if (key.isNotEmpty()) {
+                                            if (enteredCode.length < 6) {
+                                                enteredCode += key
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.padding(bottom = 8.dp, end = 8.dp)
+            ) {
+                Text("Cancel", color = OnSurfaceVariant)
             }
         },
         containerColor = SurfaceContainerHigh,
@@ -976,6 +1127,71 @@ private fun PasswordDialog(
         textContentColor = OnSurfaceVariant
     )
 }
+
+@Composable
+private fun DialogKeypadButton(
+    key: String,
+    onClick: () -> Unit
+) {
+    if (key.isEmpty()) {
+        Spacer(modifier = Modifier.size(52.dp))
+        return
+    }
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    val isDelete = key == "Delete"
+
+    Box(
+        modifier = Modifier
+            .size(52.dp)
+            .padding(1.dp)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .background(
+                    if (isPressed) {
+                        if (isDelete) SurfaceVariant else Primary.copy(alpha = 0.15f)
+                    } else {
+                        if (isDelete) Color.Transparent else SurfaceContainerLow
+                    }
+                )
+                .border(
+                    width = 1.dp,
+                    color = if (isDelete) Color.Transparent else Divider.copy(alpha = 0.05f),
+                    shape = CircleShape
+                )
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick
+                )
+        ) {
+            if (isDelete) {
+                Icon(
+                    imageVector = Icons.Outlined.KeyboardBackspace,
+                    contentDescription = "Backspace",
+                    tint = OnSurface,
+                    modifier = Modifier.size(20.dp)
+                )
+            } else {
+                Text(
+                    text = key,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 18.sp
+                    ),
+                    color = OnSurface
+                )
+            }
+        }
+    }
+}
+
 
 @Composable
 private fun fieldColors() = OutlinedTextFieldDefaults.colors(
