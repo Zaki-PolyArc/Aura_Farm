@@ -71,6 +71,7 @@ fun ExpenseScreen() {
     val symbol = currencySymbol(settings.currency)
     
     var showAddSheet by remember { mutableStateOf(false) }
+    var editingExpense by remember { mutableStateOf<ExpenseEntry?>(null) }
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
 
@@ -112,7 +113,7 @@ fun ExpenseScreen() {
         .filter { it.enabled && it.kind == "Expense" && it.nextDueEpochDay <= LocalDate.now().plusDays(7).toEpochDay() }
         .sortedBy { it.nextDueEpochDay }
 
-    val transactions = expenses.sortedByDescending { it.dateEpochDay }.take(10).map { entry ->
+    val transactions = expenses.sortedByDescending { it.dateEpochDay }.map { entry ->
         val color = categoryColors[entry.tag] ?: Primary
         val icon = categoryIcons[entry.tag] ?: Icons.Outlined.ShoppingBag
         
@@ -196,6 +197,9 @@ fun ExpenseScreen() {
                     visible = visible,
                     transactions = transactions,
                     currencySymbol = symbol,
+                    onEdit = { entryId ->
+                        editingExpense = expenses.find { it.id == entryId }
+                    },
                     onDelete = { entryId ->
                         coroutineScope.launch {
                             deleteExpenseEntry(context, entryId)
@@ -221,22 +225,39 @@ fun ExpenseScreen() {
         )
     }
 
-    if (showAddSheet) {
-        AddExpenseBottomSheet(
-            onDismiss = { showAddSheet = false },
+    if (showAddSheet || editingExpense != null) {
+        ExpenseBottomSheet(
+            existing = editingExpense,
+            onDismiss = { showAddSheet = false; editingExpense = null },
             onSave = { name, tag, amount, epochDay ->
                 coroutineScope.launch {
-                    saveExpenseEntry(
-                        context,
-                        ExpenseEntry(
-                            id = UUID.randomUUID().toString(),
-                            name = name,
-                            tag = tag,
-                            amount = amount,
-                            dateEpochDay = epochDay
+                    val current = editingExpense
+                    if (current != null) {
+                        updateExpenseEntry(
+                            context,
+                            ExpenseEntry(
+                                id = current.id,
+                                name = name,
+                                tag = tag,
+                                amount = amount,
+                                dateEpochDay = epochDay
+                            )
                         )
-                    )
+                    } else {
+                        saveExpenseEntry(
+                            context,
+                            ExpenseEntry(
+                                id = UUID.randomUUID().toString(),
+                                name = name,
+                                tag = tag,
+                                amount = amount,
+                                dateEpochDay = epochDay
+                            )
+                        )
+                    }
                 }
+                showAddSheet = false
+                editingExpense = null
             }
         )
     }
@@ -244,19 +265,30 @@ fun ExpenseScreen() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddExpenseBottomSheet(
+fun ExpenseBottomSheet(
+    existing: ExpenseEntry? = null,
     onDismiss: () -> Unit,
     onSave: (String, String, Double, Long) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var amount by remember { mutableStateOf("") }
+    val isEditMode = existing != null
+    var name by remember(existing) { mutableStateOf(existing?.name ?: "") }
+    var amount by remember(existing) { mutableStateOf(existing?.let { "%.2f".format(it.amount) } ?: "") }
     
     val categories = listOf("Food", "Transport", "Utilities", "Entertainment", "Shopping", "Health", "Other")
     var expanded by remember { mutableStateOf(false) }
-    var selectedCategory by remember { mutableStateOf(categories[0]) }
+    var selectedCategory by remember(existing) { mutableStateOf(existing?.tag ?: categories[0]) }
 
-    val initialMillis = remember { Instant.now().toEpochMilli() }
-    var selectedDateMillis by remember { mutableLongStateOf(initialMillis) }
+    val initialMillis = remember(existing) {
+        if (existing != null) {
+            LocalDate.ofEpochDay(existing.dateEpochDay)
+                .atStartOfDay(ZoneId.of("UTC"))
+                .toInstant()
+                .toEpochMilli()
+        } else {
+            Instant.now().toEpochMilli()
+        }
+    }
+    var selectedDateMillis by remember(existing) { mutableLongStateOf(initialMillis) }
     var showDatePicker by remember { mutableStateOf(false) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -275,7 +307,7 @@ fun AddExpenseBottomSheet(
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Add Expense", style = MaterialTheme.typography.headlineMedium, color = OnSurface)
+            Text(if (isEditMode) "Edit Expense" else "Add Expense", style = MaterialTheme.typography.headlineMedium, color = OnSurface)
 
             OutlinedTextField(
                 value = name,
@@ -377,7 +409,7 @@ fun AddExpenseBottomSheet(
                     disabledContentColor = OnSurfaceVariant
                 )
             ) {
-                Text("Save Expense", style = MaterialTheme.typography.labelLarge)
+                Text(if (isEditMode) "Update Expense" else "Save Expense", style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -724,6 +756,7 @@ private fun RecentActivitySection(
     visible: Boolean,
     transactions: List<Transaction>,
     currencySymbol: String,
+    onEdit: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
     Column(
@@ -775,7 +808,7 @@ private fun RecentActivitySection(
                         alpha        = rowAlpha
                     }
                 ) {
-                    TransactionRow(tx = tx, currencySymbol = currencySymbol, onDelete = onDelete)
+                    TransactionRow(tx = tx, currencySymbol = currencySymbol, onEdit = onEdit, onDelete = onDelete)
                 }
 
                 if (index < transactions.lastIndex) {
@@ -795,6 +828,7 @@ private fun RecentActivitySection(
 private fun TransactionRow(
     tx: Transaction,
     currencySymbol: String,
+    onEdit: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
     var pressed by remember { mutableStateOf(false) }
@@ -849,19 +883,27 @@ private fun TransactionRow(
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
                 text  = "-$currencySymbol${"%.2f".format(tx.amount)}",
                 style = MaterialTheme.typography.titleSmall,
                 color = OnSurface
             )
+            IconButton(onClick = { onEdit(tx.id) }) {
+                Icon(
+                    imageVector = Icons.Outlined.Edit,
+                    contentDescription = "Edit expense",
+                    tint = Primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
             IconButton(onClick = { onDelete(tx.id) }) {
                 Icon(
                     imageVector = Icons.Outlined.Delete,
                     contentDescription = "Delete expense",
                     tint = Error,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

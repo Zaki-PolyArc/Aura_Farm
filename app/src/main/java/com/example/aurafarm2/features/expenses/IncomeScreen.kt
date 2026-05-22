@@ -75,6 +75,7 @@ fun IncomeScreen() {
     val settings by remember { appSettingsFlow(context) }.collectAsState(initial = AppSettings())
     val symbol = currencySymbol(settings.currency)
     var showAddSheet by remember { mutableStateOf(false) }
+    var editingIncome by remember { mutableStateOf<IncomeEntry?>(null) }
 
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
@@ -100,7 +101,7 @@ fun IncomeScreen() {
         IncomeBreakdownItem(it.name, it.amount, it.percent, it.color, it.percent / 100f)
     }
 
-    val recentIncomeEntries = incomes.sortedByDescending { it.dateEpochDay }.take(10).map { entry ->
+    val recentIncomeEntries = incomes.sortedByDescending { it.dateEpochDay }.map { entry ->
         RecentIncomeEntry(
             id = entry.id,
             source = entry.source,
@@ -169,6 +170,9 @@ fun IncomeScreen() {
                     visible = visible,
                     entries = recentIncomeEntries,
                     currencySymbol = symbol,
+                    onEdit = { entryId ->
+                        editingIncome = incomes.find { it.id == entryId }
+                    },
                     onDelete = { entryId ->
                         coroutineScope.launch {
                             deleteIncomeEntry(context, entryId)
@@ -208,22 +212,39 @@ fun IncomeScreen() {
         )
     }
 
-    if (showAddSheet) {
-        AddIncomeBottomSheet(
-            onDismiss = { showAddSheet = false },
+    if (showAddSheet || editingIncome != null) {
+        IncomeBottomSheet(
+            existing = editingIncome,
+            onDismiss = { showAddSheet = false; editingIncome = null },
             onSave = { source, tag, amount, epochDay ->
                 coroutineScope.launch {
-                    saveIncomeEntry(
-                        context,
-                        IncomeEntry(
-                            id = UUID.randomUUID().toString(),
-                            source = source,
-                            tag = tag,
-                            amount = amount,
-                            dateEpochDay = epochDay
+                    val current = editingIncome
+                    if (current != null) {
+                        updateIncomeEntry(
+                            context,
+                            IncomeEntry(
+                                id = current.id,
+                                source = source,
+                                tag = tag,
+                                amount = amount,
+                                dateEpochDay = epochDay
+                            )
                         )
-                    )
+                    } else {
+                        saveIncomeEntry(
+                            context,
+                            IncomeEntry(
+                                id = UUID.randomUUID().toString(),
+                                source = source,
+                                tag = tag,
+                                amount = amount,
+                                dateEpochDay = epochDay
+                            )
+                        )
+                    }
                 }
+                showAddSheet = false
+                editingIncome = null
             }
         )
     }
@@ -231,19 +252,30 @@ fun IncomeScreen() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddIncomeBottomSheet(
+fun IncomeBottomSheet(
+    existing: IncomeEntry? = null,
     onDismiss: () -> Unit,
     onSave: (String, String, Double, Long) -> Unit
 ) {
-    var source by remember { mutableStateOf("") }
-    var amount by remember { mutableStateOf("") }
+    val isEditMode = existing != null
+    var source by remember(existing) { mutableStateOf(existing?.source ?: "") }
+    var amount by remember(existing) { mutableStateOf(existing?.let { "%.2f".format(it.amount) } ?: "") }
     
     val tags = listOf("Salary", "Freelance", "Investments", "Gifts", "Other")
     var expanded by remember { mutableStateOf(false) }
-    var selectedTag by remember { mutableStateOf(tags[0]) }
+    var selectedTag by remember(existing) { mutableStateOf(existing?.tag ?: tags[0]) }
 
-    val initialMillis = remember { Instant.now().toEpochMilli() }
-    var selectedDateMillis by remember { mutableLongStateOf(initialMillis) }
+    val initialMillis = remember(existing) {
+        if (existing != null) {
+            LocalDate.ofEpochDay(existing.dateEpochDay)
+                .atStartOfDay(ZoneId.of("UTC"))
+                .toInstant()
+                .toEpochMilli()
+        } else {
+            Instant.now().toEpochMilli()
+        }
+    }
+    var selectedDateMillis by remember(existing) { mutableLongStateOf(initialMillis) }
     var showDatePicker by remember { mutableStateOf(false) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -263,7 +295,7 @@ fun AddIncomeBottomSheet(
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Add Income", style = MaterialTheme.typography.headlineMedium, color = OnSurface)
+            Text(if (isEditMode) "Edit Income" else "Add Income", style = MaterialTheme.typography.headlineMedium, color = OnSurface)
 
             OutlinedTextField(
                 value = source,
@@ -365,7 +397,7 @@ fun AddIncomeBottomSheet(
                     disabledContentColor = OnSurfaceVariant
                 )
             ) {
-                Text("Save Income", style = MaterialTheme.typography.labelLarge)
+                Text(if (isEditMode) "Update Income" else "Save Income", style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -656,6 +688,7 @@ private fun RecentIncomeSection(
     visible: Boolean,
     entries: List<RecentIncomeEntry>,
     currencySymbol: String,
+    onEdit: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
     Column(
@@ -730,19 +763,27 @@ private fun RecentIncomeSection(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
                             text = "+$currencySymbol${"%.2f".format(entry.amount)}",
                             style = MaterialTheme.typography.titleSmall,
                             color = OnSurface
                         )
+                        IconButton(onClick = { onEdit(entry.id) }) {
+                            Icon(
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = "Edit income",
+                                tint = Primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                         IconButton(onClick = { onDelete(entry.id) }) {
                             Icon(
                                 imageVector = Icons.Outlined.Delete,
                                 contentDescription = "Delete income",
                                 tint = Error,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
