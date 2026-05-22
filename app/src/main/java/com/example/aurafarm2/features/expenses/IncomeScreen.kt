@@ -2,6 +2,9 @@ package com.example.aurafarm2.features.expenses
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -156,7 +159,7 @@ fun IncomeScreen() {
                             )
                             saveRecurringEntry(
                                 context,
-                                recurring.copy(nextDueEpochDay = nextRecurringDue(recurring).toEpochDay())
+                                recurring.copy(nextDueEpochDay = recurring.nextRecurringDue().toEpochDay())
                             )
                         }
                     }
@@ -472,14 +475,7 @@ private fun IncomeTopBar() {
     }
 }
 
-private fun nextRecurringDue(entry: RecurringEntry): LocalDate {
-    val base = LocalDate.ofEpochDay(entry.nextDueEpochDay)
-    return when (entry.repeat) {
-        "Weekly" -> base.plusWeeks(1)
-        "Yearly" -> base.plusYears(1)
-        else -> base.plusMonths(1)
-    }
-}
+// nextRecurringDue private function removed, now using extension function from Storage.kt
 
 // ── Hero ───────────────────────────────────────────────────────
 
@@ -691,105 +687,89 @@ private fun RecentIncomeSection(
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
+    var selectedFilter by remember { mutableStateOf("All") }
+    var expanded by remember { mutableStateOf(false) }
+
+    val categories = listOf("All", "Salary", "Freelance", "Investments", "Gifts", "Other")
+
+    val filteredEntries = if (selectedFilter == "All") {
+        entries
+    } else {
+        entries.filter { it.tag.equals(selectedFilter, ignoreCase = true) }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
     ) {
-        Text(
-            text = "Recent Income",
-            style = MaterialTheme.typography.headlineLarge,
-            color = OnSurface
-        )
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Text(
+                text  = "Recent Income",
+                style = MaterialTheme.typography.headlineLarge,
+                color = OnSurface
+            )
+            Box {
+                TextButton(
+                    onClick = { expanded = true },
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        text  = if (selectedFilter == "All") "FILTER" else "FILTER: ${selectedFilter.uppercase()}",
+                        style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.sp),
+                        color = Primary
+                    )
+                }
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.background(SurfaceContainer)
+                ) {
+                    categories.forEach { category ->
+                        DropdownMenuItem(
+                            text = { Text(text = category, color = OnSurface) },
+                            onClick = {
+                                selectedFilter = category
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
 
         Spacer(Modifier.height(20.dp))
 
-        if (entries.isEmpty()) {
+        if (filteredEntries.isEmpty()) {
             Text(
-                text = "No income entries yet.",
+                text = "No income entries found.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurfaceVariant,
                 modifier = Modifier.padding(vertical = 16.dp)
             )
         } else {
-            entries.forEachIndexed { index, entry ->
+            filteredEntries.forEachIndexed { index, entry ->
                 val rowAlpha by animateFloatAsState(
                     targetValue = if (visible) 1f else 0f,
                     animationSpec = tween(300, delayMillis = 300 + index * 70),
                     label = "income_entry_alpha_$index"
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .graphicsLayer { alpha = rowAlpha }
-                        .padding(vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                Box(
+                    modifier = Modifier.graphicsLayer { alpha = rowAlpha }
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(SurfaceContainerHigh),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Payments,
-                                contentDescription = null,
-                                tint = Primary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        Column {
-                            Text(
-                                text = entry.source,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = OnSurface
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = "${entry.tag} • ${entry.date}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = OnSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "+$currencySymbol${"%.2f".format(entry.amount)}",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = OnSurface
-                        )
-                        IconButton(onClick = { onEdit(entry.id) }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Edit,
-                                contentDescription = "Edit income",
-                                tint = Primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        IconButton(onClick = { onDelete(entry.id) }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = "Delete income",
-                                tint = Error,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
+                    RecentIncomeRow(
+                        entry = entry,
+                        currencySymbol = currencySymbol,
+                        onEdit = onEdit,
+                        onDelete = onDelete
+                    )
                 }
 
-                if (index < entries.lastIndex) {
+                if (index < filteredEntries.lastIndex) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -797,6 +777,99 @@ private fun RecentIncomeSection(
                             .background(Divider)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentIncomeRow(
+    entry: RecentIncomeEntry,
+    currencySymbol: String,
+    onEdit: (String) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    
+    val scale by animateFloatAsState(
+        targetValue   = if (isPressed) 0.97f else 1f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessHigh),
+        label         = "income_press_scale"
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = { onEdit(entry.id) }
+            )
+            .padding(vertical = 14.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(SurfaceContainerHigh),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Payments,
+                    contentDescription = null,
+                    tint = Primary,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            Column {
+                Text(
+                    text = entry.source,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = OnSurface
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "${entry.tag} • ${entry.date}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant
+                )
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "+$currencySymbol${"%.2f".format(entry.amount)}",
+                style = MaterialTheme.typography.titleSmall,
+                color = OnSurface
+            )
+            IconButton(onClick = { onEdit(entry.id) }) {
+                Icon(
+                    imageVector = Icons.Outlined.Edit,
+                    contentDescription = "Edit income",
+                    tint = Primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            IconButton(onClick = { onDelete(entry.id) }) {
+                Icon(
+                    imageVector = Icons.Outlined.Delete,
+                    contentDescription = "Delete income",
+                    tint = Error,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }

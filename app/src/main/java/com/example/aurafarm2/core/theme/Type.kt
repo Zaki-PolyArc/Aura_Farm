@@ -5,17 +5,30 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.googlefonts.GoogleFont
+import androidx.compose.ui.text.googlefonts.Font
+import com.example.aurafarm2.R
 
 // ── NOTE ───────────────────────────────────────────────────────
 // This design system uses Manrope exclusively.
-// Download Manrope from fonts.google.com, place all weight TTFs
-// in app/src/main/res/font/, then replace FontFamily.Default.
-//
-// Weights needed: ExtraLight(200), Light(300), Regular(400),
-//                 Medium(500), SemiBold(600)
+// Download Manrope dynamically using Google Fonts.
 // ──────────────────────────────────────────────────────────────
 
-val ManropeFamily = FontFamily.Default   // → replace with Manrope
+private val provider = GoogleFont.Provider(
+    providerAuthority = "com.google.android.gms.fonts",
+    providerPackage = "com.google.android.gms",
+    certificates = R.array.com_google_android_gms_fonts_certs
+)
+
+private val fontName = GoogleFont("Manrope")
+
+val ManropeFamily = FontFamily(
+    Font(googleFont = fontName, fontProvider = provider, weight = FontWeight.ExtraLight),
+    Font(googleFont = fontName, fontProvider = provider, weight = FontWeight.Light),
+    Font(googleFont = fontName, fontProvider = provider, weight = FontWeight.Normal),
+    Font(googleFont = fontName, fontProvider = provider, weight = FontWeight.Medium),
+    Font(googleFont = fontName, fontProvider = provider, weight = FontWeight.SemiBold)
+)
 
 val AppTypography = Typography(
 

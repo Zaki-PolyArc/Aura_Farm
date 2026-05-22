@@ -2,8 +2,6 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.hilt)
-    alias(libs.plugins.ksp)
 }
 
 android {
@@ -59,39 +57,23 @@ dependencies {
     // Navigation
     implementation(libs.androidx.navigation.compose)
 
-    // Hilt
-    implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
-    implementation(libs.hilt.navigation.compose)
-
-    // Room
-    implementation(libs.room.runtime)
-    implementation(libs.room.ktx)
-    ksp(libs.room.compiler)
-
     // DataStore
     implementation(libs.datastore.preferences)
 
     // WorkManager
     implementation(libs.workmanager.ktx)
-    implementation(libs.hilt.work)
-    ksp(libs.hilt.work.compiler)
 
     // Coroutines
     implementation(libs.coroutines.android)
-
-    // Vico Charts
-    implementation(libs.vico.compose)
-    implementation(libs.vico.compose.m3)
-
-    // Lottie
-    implementation(libs.lottie.compose)
 
     // Security
     implementation(libs.androidx.biometric)
 
     // Splash Screen
     implementation(libs.androidx.core.splashscreen)
+
+    // Downloadable Fonts
+    implementation(libs.androidx.ui.text.google.fonts)
 
     debugImplementation(libs.androidx.ui.tooling)
 }

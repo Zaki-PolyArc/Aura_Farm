@@ -92,6 +92,7 @@ fun SettingsScreen() {
     var showBudgetDialog by remember { mutableStateOf(false) }
     var showRecurringDialog by remember { mutableStateOf(false) }
     var biometricMessage by remember { mutableStateOf<String?>(null) }
+    var showSignOutConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { visible = true }
 
@@ -172,8 +173,8 @@ fun SettingsScreen() {
         AnimatedSettingsSection(visible, 280) {
             SettingsGroup(label = "SECURITY") {
                 SettingsRow(
-                    label = if (settings.hasPassword) "Change Password" else "Set Password",
-                    value = if (settings.hasPassword) "Set" else "Not set",
+                    label = if (settings.hasPassword) "Change Security PIN" else "Set Security PIN",
+                    value = if (settings.hasPassword) "Active" else "Not set",
                     onClick = { showPasswordDialog = true }
                 )
                 SettingsDivider()
@@ -197,7 +198,7 @@ fun SettingsScreen() {
 
         Spacer(Modifier.height(32.dp))
 
-        AnimatedSettingsSection(visible, 340) { SignOutButton() }
+        AnimatedSettingsSection(visible, 340) { SignOutButton(onClick = { showSignOutConfirm = true }) }
 
         Spacer(Modifier.height(16.dp))
 
@@ -320,6 +321,38 @@ fun SettingsScreen() {
             },
             title = { Text("Biometric Login") },
             text = { Text(message) },
+            containerColor = SurfaceContainerHigh,
+            titleContentColor = OnSurface,
+            textContentColor = OnSurfaceVariant
+        )
+    }
+
+    if (showSignOutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showSignOutConfirm = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            clearPassword(context)
+                        }
+                        showSignOutConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Error,
+                        contentColor = OnPrimary
+                    )
+                ) {
+                    Text("Sign Out")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignOutConfirm = false }) {
+                    Text("Cancel", color = OnSurfaceVariant)
+                }
+            },
+            title = { Text("Sign Out") },
+            text = { Text("Are you sure you want to sign out? This will reset your security passcode and biometric settings.") },
             containerColor = SurfaceContainerHigh,
             titleContentColor = OnSurface,
             textContentColor = OnSurfaceVariant
@@ -879,7 +912,7 @@ private fun PasswordDialog(
 ) {
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
-    val isValid = password.length >= 6 && password == confirmPassword
+    val isValid = password.length == 6 && password == confirmPassword
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -902,29 +935,37 @@ private fun PasswordDialog(
                 Text("Cancel", color = OnSurfaceVariant)
             }
         },
-        title = { Text("Password") },
+        title = { Text("Set Security PIN") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = password,
-                    onValueChange = { password = it },
-                    label = { Text("New password") },
+                    onValueChange = { input ->
+                        if (input.all { it.isDigit() } && input.length <= 6) {
+                            password = input
+                        }
+                    },
+                    label = { Text("New 6-digit PIN") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     colors = fieldColors()
                 )
                 OutlinedTextField(
                     value = confirmPassword,
-                    onValueChange = { confirmPassword = it },
-                    label = { Text("Confirm password") },
+                    onValueChange = { input ->
+                        if (input.all { it.isDigit() } && input.length <= 6) {
+                            confirmPassword = input
+                        }
+                    },
+                    label = { Text("Confirm 6-digit PIN") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     colors = fieldColors()
                 )
                 Text(
-                    text = "Use at least 6 characters.",
+                    text = "Enter exactly 6 numeric digits.",
                     style = MaterialTheme.typography.bodySmall,
                     color = OnSurfaceVariant
                 )
@@ -1008,9 +1049,9 @@ private fun Context.findFragmentActivity(): FragmentActivity? {
 }
 
 @Composable
-private fun SignOutButton() {
+private fun SignOutButton(onClick: () -> Unit) {
     TextButton(
-        onClick = {},
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)

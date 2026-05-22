@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -28,6 +29,9 @@ import com.example.aurafarm2.core.theme.*
 import com.example.aurafarm2.features.expenses.ExpenseScreen
 import com.example.aurafarm2.features.expenses.IncomeScreen
 import com.example.aurafarm2.features.expenses.SettingsScreen
+
+import com.example.aurafarm2.features.expenses.SecurityLockScreen
+import com.example.aurafarm2.features.expenses.appSettingsFlow
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,7 +41,30 @@ class MainActivity : FragmentActivity() {
         createReminderChannel()
         requestNotificationPermission()
         setContent {
-            AppTheme { MainShell() }
+            val settings = remember { appSettingsFlow(applicationContext) }.collectAsState(initial = null).value
+            
+            if (settings == null) {
+                // Render placeholder while settings load to prevent visual jump
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF13131A)) // Dark raw background or default background
+                )
+            } else {
+                val appearance = settings.appearance
+                AppTheme(appearance = appearance) {
+                    var isAuthenticated by remember { mutableStateOf(false) }
+                    
+                    if (settings.hasPassword && !isAuthenticated) {
+                        SecurityLockScreen(
+                            settings = settings,
+                            onAuthenticated = { isAuthenticated = true }
+                        )
+                    } else {
+                        MainShell()
+                    }
+                }
+            }
         }
     }
 

@@ -7,11 +7,13 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.time.LocalDate
 
 // ── Shared DataStore instances ────────────────────────────────
 
@@ -88,6 +90,15 @@ data class RecurringEntry(
     val enabled: Boolean
 )
 
+fun RecurringEntry.nextRecurringDue(): LocalDate {
+    val base = LocalDate.ofEpochDay(this.nextDueEpochDay)
+    return when (this.repeat) {
+        "Weekly" -> base.plusWeeks(1)
+        "Yearly" -> base.plusYears(1)
+        else -> base.plusMonths(1)
+    }
+}
+
 // ── Expense Operations ────────────────────────────────────────
 
 fun appSettingsFlow(context: Context): Flow<AppSettings> =
@@ -135,6 +146,22 @@ suspend fun saveBiometricEnabled(context: Context, enabled: Boolean) {
         prefs[BIOMETRIC_ENABLED_KEY] = enabled
     }
 }
+
+suspend fun clearPassword(context: Context) {
+    context.settingsDataStore.edit { prefs ->
+        prefs.remove(PASSWORD_SALT_KEY)
+        prefs.remove(PASSWORD_HASH_KEY)
+        prefs.remove(BIOMETRIC_ENABLED_KEY)
+    }
+}
+
+suspend fun verifyPassword(context: Context, password: String): Boolean {
+    val prefs = context.settingsDataStore.data.first()
+    val salt = prefs[PASSWORD_SALT_KEY] ?: return false
+    val storedHash = prefs[PASSWORD_HASH_KEY] ?: return false
+    return hashPassword(password, salt) == storedHash
+}
+
 
 fun remindersFlow(context: Context): Flow<List<Reminder>> =
     context.settingsDataStore.data.map { prefs ->
@@ -321,7 +348,8 @@ fun expenseEntriesFlow(context: Context): Flow<List<ExpenseEntry>> =
 suspend fun saveExpenseEntry(context: Context, entry: ExpenseEntry) {
     context.expenseDataStore.edit { prefs ->
         val current = decodeExpenseEntries(prefs[EXPENSE_ENTRIES_KEY] ?: "[]")
-        prefs[EXPENSE_ENTRIES_KEY] = encodeExpenseEntries(current + entry)
+        val updated = current.filterNot { it.id == entry.id } + entry
+        prefs[EXPENSE_ENTRIES_KEY] = encodeExpenseEntries(updated)
     }
 }
 
@@ -385,7 +413,8 @@ fun incomeEntriesFlow(context: Context): Flow<List<IncomeEntry>> =
 suspend fun saveIncomeEntry(context: Context, entry: IncomeEntry) {
     context.incomeDataStore.edit { prefs ->
         val current = decodeIncomeEntries(prefs[INCOME_ENTRIES_KEY] ?: "[]")
-        prefs[INCOME_ENTRIES_KEY] = encodeIncomeEntries(current + entry)
+        val updated = current.filterNot { it.id == entry.id } + entry
+        prefs[INCOME_ENTRIES_KEY] = encodeIncomeEntries(updated)
     }
 }
 

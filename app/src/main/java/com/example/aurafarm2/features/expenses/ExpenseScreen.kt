@@ -2,6 +2,9 @@ package com.example.aurafarm2.features.expenses
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -183,7 +186,7 @@ fun ExpenseScreen() {
                             )
                             saveRecurringEntry(
                                 context,
-                                recurring.copy(nextDueEpochDay = nextRecurringDue(recurring).toEpochDay())
+                                recurring.copy(nextDueEpochDay = recurring.nextRecurringDue().toEpochDay())
                             )
                         }
                     }
@@ -759,6 +762,17 @@ private fun RecentActivitySection(
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
+    var selectedFilter by remember { mutableStateOf("All") }
+    var expanded by remember { mutableStateOf(false) }
+
+    val categories = listOf("All", "Food", "Transport", "Utilities", "Entertainment", "Shopping", "Health", "Other")
+
+    val filteredTransactions = if (selectedFilter == "All") {
+        transactions
+    } else {
+        transactions.filter { it.category == selectedFilter }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -774,23 +788,45 @@ private fun RecentActivitySection(
                 style = MaterialTheme.typography.headlineMedium,
                 color = OnSurface
             )
-            Text(
-                text  = "FILTER",
-                style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.sp),
-                color = Primary
-            )
+            Box {
+                TextButton(
+                    onClick = { expanded = true },
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        text  = if (selectedFilter == "All") "FILTER" else "FILTER: ${selectedFilter.uppercase()}",
+                        style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.sp),
+                        color = Primary
+                    )
+                }
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.background(SurfaceContainer)
+                ) {
+                    categories.forEach { category ->
+                        DropdownMenuItem(
+                            text = { Text(text = category, color = OnSurface) },
+                            onClick = {
+                                selectedFilter = category
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
         }
 
         Spacer(Modifier.height(24.dp))
 
-        if (transactions.isEmpty()) {
+        if (filteredTransactions.isEmpty()) {
             Text(
                 text = "No recent transactions.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurfaceVariant
             )
         } else {
-            transactions.forEachIndexed { index, tx ->
+            filteredTransactions.forEachIndexed { index, tx ->
                 val rowOffset by animateFloatAsState(
                     targetValue   = if (visible) 0f else 60f,
                     animationSpec = tween(400, delayMillis = 300 + index * 70, easing = FastOutSlowInEasing),
@@ -811,7 +847,7 @@ private fun RecentActivitySection(
                     TransactionRow(tx = tx, currencySymbol = currencySymbol, onEdit = onEdit, onDelete = onDelete)
                 }
 
-                if (index < transactions.lastIndex) {
+                if (index < filteredTransactions.lastIndex) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -831,9 +867,11 @@ private fun TransactionRow(
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
-    var pressed by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    
     val scale by animateFloatAsState(
-        targetValue   = if (pressed) 0.97f else 1f,
+        targetValue   = if (isPressed) 0.97f else 1f,
         animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessHigh),
         label         = "press_scale"
     )
@@ -842,6 +880,11 @@ private fun TransactionRow(
         modifier = Modifier
             .fillMaxWidth()
             .scale(scale)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = { onEdit(tx.id) }
+            )
             .padding(vertical = 18.dp),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -910,14 +953,7 @@ private fun TransactionRow(
     }
 }
 
-private fun nextRecurringDue(entry: RecurringEntry): LocalDate {
-    val base = LocalDate.ofEpochDay(entry.nextDueEpochDay)
-    return when (entry.repeat) {
-        "Weekly" -> base.plusWeeks(1)
-        "Yearly" -> base.plusYears(1)
-        else -> base.plusMonths(1)
-    }
-}
+
 
 // ── FAB ────────────────────────────────────────────────────────
 
