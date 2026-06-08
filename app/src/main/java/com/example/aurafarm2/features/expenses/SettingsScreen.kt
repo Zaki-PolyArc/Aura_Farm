@@ -2,6 +2,10 @@ package com.example.aurafarm2.features.expenses
 
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -102,6 +106,7 @@ fun SettingsScreen() {
     val reminders by remember { remindersFlow(context) }.collectAsState(initial = emptyList())
     val budgets by remember { budgetsFlow(context) }.collectAsState(initial = emptyList())
     val recurringEntries by remember { recurringEntriesFlow(context) }.collectAsState(initial = emptyList())
+    val corrections by remember { categoryCorrectionsFlow(context) }.collectAsState(initial = emptyList())
 
     var visible by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
@@ -111,8 +116,30 @@ fun SettingsScreen() {
     var showReminderDialog by remember { mutableStateOf(false) }
     var showBudgetDialog by remember { mutableStateOf(false) }
     var showRecurringDialog by remember { mutableStateOf(false) }
+    var showCorrectionDialog by remember { mutableStateOf(false) }
     var biometricMessage by remember { mutableStateOf<String?>(null) }
     var showSignOutConfirm by remember { mutableStateOf(false) }
+    var restoreMessage by remember { mutableStateOf<String?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        uri?.let {
+            coroutineScope.launch {
+                CsvBackupManager.exportToUri(context, it)
+                restoreMessage = "Backup exported successfully."
+            }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            coroutineScope.launch {
+                val summary = CsvBackupManager.restoreFromUri(context, it)
+                restoreMessage = "Imported ${summary.importedExpenses} expenses, ${summary.importedIncome} income, ${summary.importedBudgets} budgets, ${summary.importedRecurring} recurring entries, ${summary.importedCorrections} corrections. Skipped ${summary.skippedRows} rows."
+            }
+        }
+    }
 
     LaunchedEffect(Unit) { visible = true }
 
@@ -154,6 +181,35 @@ fun SettingsScreen() {
 
         Spacer(Modifier.height(32.dp))
 
+        AnimatedSettingsSection(visible, 190) {
+            SettingsGroup(label = "SMART DETECTION") {
+                ToggleSettingsRow(
+                    label = "Auto-detect Transactions",
+                    value = if (settings.smartDetectionEnabled) "On" else "Off",
+                    checked = settings.smartDetectionEnabled,
+                    onCheckedChange = {
+                        coroutineScope.launch { saveSmartDetectionEnabled(context, it) }
+                    }
+                )
+                SettingsDivider()
+                SettingsRow(
+                    label = "Notification Access",
+                    value = "Open Android settings",
+                    onClick = {
+                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    }
+                )
+                SettingsDivider()
+                SettingsRow(
+                    label = "Category Corrections",
+                    value = "${corrections.size} learned",
+                    onClick = { showCorrectionDialog = true }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(32.dp))
+
         AnimatedSettingsSection(visible, 220) {
             SettingsGroup(label = "PREFERENCES") {
                 SettingsRow(
@@ -184,6 +240,24 @@ fun SettingsScreen() {
                     label = "Recurring Entries",
                     value = "${recurringEntries.count { it.enabled }} active",
                     onClick = { showRecurringDialog = true }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(32.dp))
+
+        AnimatedSettingsSection(visible, 270) {
+            SettingsGroup(label = "BACKUP & RESTORE") {
+                SettingsRow(
+                    label = "Export CSV Backup",
+                    value = "Create file",
+                    onClick = { exportLauncher.launch(CsvBackupManager.suggestedFileName()) }
+                )
+                SettingsDivider()
+                SettingsRow(
+                    label = "Restore CSV Backup",
+                    value = "Pick file",
+                    onClick = { importLauncher.launch("text/*") }
                 )
             }
         }
@@ -336,6 +410,19 @@ fun SettingsScreen() {
         )
     }
 
+    if (showCorrectionDialog) {
+        CategoryCorrectionDialog(
+            corrections = corrections,
+            onDismiss = { showCorrectionDialog = false },
+            onSave = { correction ->
+                coroutineScope.launch { saveCategoryCorrection(context, correction) }
+            },
+            onDelete = { correction ->
+                coroutineScope.launch { deleteCategoryCorrection(context, correction.merchant) }
+            }
+        )
+    }
+
     biometricMessage?.let { message ->
         AlertDialog(
             onDismissRequest = { biometricMessage = null },
@@ -378,6 +465,22 @@ fun SettingsScreen() {
             },
             title = { Text("Sign Out") },
             text = { Text("Are you sure you want to sign out? This will reset your security passcode and biometric settings.") },
+            containerColor = SurfaceContainerHigh,
+            titleContentColor = OnSurface,
+            textContentColor = OnSurfaceVariant
+        )
+    }
+
+    restoreMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { restoreMessage = null },
+            confirmButton = {
+                TextButton(onClick = { restoreMessage = null }) {
+                    Text("OK", color = Primary)
+                }
+            },
+            title = { Text("Backup & Restore") },
+            text = { Text(message) },
             containerColor = SurfaceContainerHigh,
             titleContentColor = OnSurface,
             textContentColor = OnSurfaceVariant
@@ -516,6 +619,28 @@ private fun SettingsRow(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ToggleSettingsRow(
+    label: String,
+    value: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = OnSurface)
+            Text(value, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
@@ -793,6 +918,72 @@ private fun BudgetManagerDialog(
                     colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary)
                 ) {
                     Text("Save budget")
+                }
+            }
+        },
+        containerColor = SurfaceContainerHigh,
+        titleContentColor = OnSurface,
+        textContentColor = OnSurfaceVariant
+    )
+}
+
+@Composable
+private fun CategoryCorrectionDialog(
+    corrections: List<CategoryCorrection>,
+    onDismiss: () -> Unit,
+    onSave: (CategoryCorrection) -> Unit,
+    onDelete: (CategoryCorrection) -> Unit
+) {
+    var merchant by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("Food") }
+    val categories = listOf("Food", "Transport", "Shopping", "Utilities", "Entertainment", "Health", "Other", "Uncategorized")
+    val canSave = merchant.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Done", color = Primary) } },
+        title = { Text("Category Corrections") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (corrections.isEmpty()) {
+                    Text("No learned corrections yet.", color = OnSurfaceVariant)
+                } else {
+                    corrections.sortedBy { it.merchant }.forEach { correction ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(correction.merchant, color = OnSurface)
+                                Text(correction.category, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+                            }
+                            TextButton(onClick = { onDelete(correction) }) {
+                                Text("Delete", color = Error)
+                            }
+                        }
+                    }
+                }
+                SettingsDivider()
+                Text("Teach a merchant", style = MaterialTheme.typography.titleMedium, color = OnSurface)
+                OutlinedTextField(
+                    merchant,
+                    { merchant = it },
+                    label = { Text("Merchant") },
+                    singleLine = true,
+                    colors = fieldColors()
+                )
+                ChoiceChips(categories, category) { category = it }
+                Button(
+                    onClick = {
+                        onSave(CategoryCorrection(merchant, category))
+                        merchant = ""
+                    },
+                    enabled = canSave,
+                    colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary)
+                ) {
+                    Text("Save correction")
                 }
             }
         },

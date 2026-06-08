@@ -75,5 +75,7 @@ dependencies {
     // Downloadable Fonts
     implementation(libs.androidx.ui.text.google.fonts)
 
+    testImplementation(libs.junit)
+
     debugImplementation(libs.androidx.ui.tooling)
 }
