@@ -9,155 +9,72 @@ import androidx.compose.ui.text.googlefonts.GoogleFont
 import androidx.compose.ui.text.googlefonts.Font
 import com.example.aurafarm2.R
 
-// ── NOTE ───────────────────────────────────────────────────────
-// This design system uses Manrope exclusively.
-// Download Manrope dynamically using Google Fonts.
-// ──────────────────────────────────────────────────────────────
-
 private val provider = GoogleFont.Provider(
     providerAuthority = "com.google.android.gms.fonts",
     providerPackage = "com.google.android.gms",
     certificates = R.array.com_google_android_gms_fonts_certs
 )
 
-private val fontName = GoogleFont("Manrope")
+val GeistFamily = FontFamily(
+    Font(googleFont = GoogleFont("Geist"), fontProvider = provider, weight = FontWeight.Normal),
+    Font(googleFont = GoogleFont("Geist"), fontProvider = provider, weight = FontWeight.Medium),
+    Font(googleFont = GoogleFont("Geist"), fontProvider = provider, weight = FontWeight.SemiBold)
+)
 
-val ManropeFamily = FontFamily(
-    Font(googleFont = fontName, fontProvider = provider, weight = FontWeight.ExtraLight),
-    Font(googleFont = fontName, fontProvider = provider, weight = FontWeight.Light),
-    Font(googleFont = fontName, fontProvider = provider, weight = FontWeight.Normal),
-    Font(googleFont = fontName, fontProvider = provider, weight = FontWeight.Medium),
-    Font(googleFont = fontName, fontProvider = provider, weight = FontWeight.SemiBold)
+val HankenGroteskFamily = FontFamily(
+    Font(googleFont = GoogleFont("Hanken Grotesk"), fontProvider = provider, weight = FontWeight.Normal),
+    Font(googleFont = GoogleFont("Hanken Grotesk"), fontProvider = provider, weight = FontWeight.Medium),
+    Font(googleFont = GoogleFont("Hanken Grotesk"), fontProvider = provider, weight = FontWeight.SemiBold),
+    Font(googleFont = GoogleFont("Hanken Grotesk"), fontProvider = provider, weight = FontWeight.Bold)
 )
 
 val AppTypography = Typography(
-
-    // display-stat: 48sp W200 — hero numbers ($12,450.00)
+    // display-xl
     displayLarge = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.ExtraLight,
-        fontSize      = 48.sp,
-        lineHeight    = 56.sp,
-        letterSpacing = (-0.96).sp            // -0.02em
+        fontFamily = HankenGroteskFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 48.sp,
+        lineHeight = 56.sp,
+        letterSpacing = (-1.92).sp // -0.04em
     ),
-
-    // display-stat-mobile: 36sp W200
-    displayMedium = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.ExtraLight,
-        fontSize      = 36.sp,
-        lineHeight    = 44.sp,
-        letterSpacing = (-0.72).sp
-    ),
-
-    displaySmall = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Light,
-        fontSize      = 28.sp,
-        lineHeight    = 36.sp,
-        letterSpacing = (-0.56).sp
-    ),
-
-    // headline-lg: 32sp W300 — "Income Streams", "Breakdown"
+    // headline-lg
     headlineLarge = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Light,
-        fontSize      = 32.sp,
-        lineHeight    = 40.sp,
-        letterSpacing = 0.sp
+        fontFamily = HankenGroteskFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 32.sp,
+        lineHeight = 40.sp,
+        letterSpacing = (-0.64).sp // -0.02em
     ),
-
-    // headline-md: 24sp W400 — "Allocation", "Recent Activity"
+    // headline-lg-mobile
     headlineMedium = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Normal,
-        fontSize      = 24.sp,
-        lineHeight    = 32.sp,
-        letterSpacing = 0.sp
+        fontFamily = HankenGroteskFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
+        letterSpacing = (-0.48).sp // -0.02em
     ),
-
-    // top bar title "Focus"
-    headlineSmall = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.SemiBold,
-        fontSize      = 20.sp,
-        lineHeight    = 28.sp,
-        letterSpacing = 0.sp
-    ),
-
-    // body-lg: 18sp W400 — income stream names "Salary"
-    titleLarge = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Normal,
-        fontSize      = 18.sp,
-        lineHeight    = 28.sp,
-        letterSpacing = 0.sp
-    ),
-
-    // body-md: 16sp W400 — transaction names, subtitles
-    titleMedium = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Normal,
-        fontSize      = 16.sp,
-        lineHeight    = 24.sp,
-        letterSpacing = 0.sp
-    ),
-
-    titleSmall = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Medium,
-        fontSize      = 14.sp,
-        lineHeight    = 20.sp,
-        letterSpacing = 0.sp
-    ),
-
+    // body-md
     bodyLarge = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Normal,
-        fontSize      = 16.sp,
-        lineHeight    = 24.sp,
+        fontFamily = HankenGroteskFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
         letterSpacing = 0.sp
     ),
-
+    // data-mono
     bodyMedium = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Normal,
-        fontSize      = 14.sp,
-        lineHeight    = 20.sp,
-        letterSpacing = 0.sp
+        fontFamily = GeistFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = (-0.14).sp // -0.01em
     ),
-
-    bodySmall = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Normal,
-        fontSize      = 12.sp,
-        lineHeight    = 16.sp,
-        letterSpacing = 0.sp
-    ),
-
-    // label-bold: 14sp W600 tracking +0.05em — "MONTHLY NET BALANCE", "FILTER"
-    labelLarge = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.SemiBold,
-        fontSize      = 14.sp,
-        lineHeight    = 20.sp,
-        letterSpacing = 0.7.sp               // +0.05em at 14sp
-    ),
-
-    // label-sm: 12sp W500
-    labelMedium = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Medium,
-        fontSize      = 12.sp,
-        lineHeight    = 16.sp,
-        letterSpacing = 0.sp
-    ),
-
+    // label-sm
     labelSmall = TextStyle(
-        fontFamily    = ManropeFamily,
-        fontWeight    = FontWeight.Medium,
-        fontSize      = 11.sp,
-        lineHeight    = 14.sp,
-        letterSpacing = 0.sp
+        fontFamily = GeistFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.6.sp // 0.05em
     )
 )

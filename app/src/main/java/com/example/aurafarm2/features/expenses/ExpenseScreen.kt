@@ -2,6 +2,7 @@ package com.example.aurafarm2.features.expenses
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -167,52 +168,14 @@ fun ExpenseScreen() {
 
             Spacer(Modifier.height(36.dp))
 
-            val chartData = expenses
-                .filter { selectedTimeRange == 0 || (LocalDate.now().toEpochDay() - it.dateEpochDay) <= selectedTimeRange }
-                .groupBy { it.dateEpochDay }
-                .map { (date, entries) -> ChartDataPoint(date, entries.sumOf { it.amount }) }
-                .sortedBy { it.dateEpochDay }
-
-            val maxDate = LocalDate.now().toEpochDay()
-            val minDate = if (selectedTimeRange > 0) {
-                maxDate - selectedTimeRange
-            } else {
-                chartData.minOfOrNull { it.dateEpochDay } ?: (maxDate - 30)
-            }
-
+            val totalLimit = budgets.sumOf { it.limit ?: 0.0 }
             AnimatedSection(visible, 110) {
-                Column(modifier = Modifier.padding(horizontal = 24.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Spending Trend", style = MaterialTheme.typography.titleMedium, color = OnSurface)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.background(SurfaceContainerHigh, RoundedCornerShape(20.dp)).padding(4.dp)
-                        ) {
-                            listOf(7 to "7D", 30 to "30D", 0 to "ALL").forEach { (days, label) ->
-                                val isSelected = selectedTimeRange == days
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(if (isSelected) Primary else Color.Transparent)
-                                        .clickable { selectedTimeRange = days }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Text(
-                                        label,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (isSelected) OnPrimary else OnSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    TrendLineChart(data = chartData, minDate = minDate, maxDate = maxDate, currencySymbol = symbol, lineColor = Error)
-                }
+                ProgressArcSection(
+                    spent = totalExpenses,
+                    limit = totalLimit,
+                    currencySymbol = symbol,
+                    visible = visible
+                )
             }
 
             Spacer(Modifier.height(36.dp))
@@ -592,43 +555,118 @@ private fun ExpenseTopBar() {
 @Composable
 private fun ExpenseHeroSection(visible: Boolean, netBalance: Double, currencySymbol: String) {
     Column(
-        modifier            = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text      = "MONTHLY NET BALANCE",
-            style     = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp),
-            color     = OnSurfaceVariant,
-            textAlign = TextAlign.Center
+            text = "NET BALANCE",
+            style = MaterialTheme.typography.labelSmall,
+            color = Outline
         )
-
-        Spacer(Modifier.height(12.dp))
-
+        Spacer(Modifier.height(8.dp))
         val animVal by animateFloatAsState(
-            targetValue   = if (visible) netBalance.toFloat() else 0f,
+            targetValue = if (visible) netBalance.toFloat() else 0f,
             animationSpec = tween(1200, easing = FastOutSlowInEasing),
-            label         = "hero_count"
+            label = "hero_count"
         )
-        val sign = if (animVal >= 0) "+" else "-"
-        val colorVal = if (animVal >= 0) Primary else Error
+        val sign = if (animVal < 0) "-" else ""
+        val formatted = "%.2f".format(Math.abs(animVal))
+        val parts = formatted.split(".")
+        val main = parts[0]
+        val fraction = if (parts.size > 1) ".${parts[1]}" else ""
+
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text = "$sign$currencySymbol$main",
+                style = MaterialTheme.typography.displayLarge,
+                color = Primary
+            )
+            Text(
+                text = fraction,
+                style = MaterialTheme.typography.displayLarge,
+                color = Outline
+            )
+        }
+    }
+}
+
+@Composable
+fun ProgressArcSection(spent: Double, limit: Double, currencySymbol: String, visible: Boolean) {
+    val progress = if (limit > 0) (spent / limit).coerceIn(0.0, 1.0).toFloat() else 0f
+    val animProgress by animateFloatAsState(
+        targetValue = if (visible) progress else 0f,
+        animationSpec = tween(1500, easing = FastOutSlowInEasing),
+        label = "arc_progress"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
+            val radius = size.minDimension / 2 - 24.dp.toPx()
+            val outerRadius = size.minDimension / 2 - 8.dp.toPx()
+            
+            // Background Track
+            drawCircle(
+                color = Color.White.copy(alpha = 0.05f),
+                radius = radius,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
+            )
+            
+            // Dashed Indicator Track
+            drawCircle(
+                color = Color.White.copy(alpha = 0.1f),
+                radius = outerRadius,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = 1.dp.toPx(),
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 6.dp.toPx()))
+                )
+            )
+            
+            // Active Progress Arc
+            drawArc(
+                color = Color.White,
+                startAngle = -90f,
+                sweepAngle = 360f * animProgress,
+                useCenter = false,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                topLeft = androidx.compose.ui.geometry.Offset(center.x - radius, center.y - radius),
+                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2)
+            )
+        }
         
-        Text(
-            text      = "$sign$currencySymbol${"%.2f".format(Math.abs(animVal))}",
-            style     = MaterialTheme.typography.displayLarge,
-            color     = colorVal,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        Text(
-            text      = "Income - Expenses",
-            style     = MaterialTheme.typography.bodyMedium,
-            color     = OnSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
+        // Inner content
+        Box(
+            modifier = Modifier
+                .size(192.dp)
+                .clip(CircleShape)
+                .background(SurfaceContainerLowest.copy(alpha = 0.6f))
+                .border(1.dp, Color.White.copy(alpha = 0.05f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("SPENT", style = MaterialTheme.typography.labelSmall, color = Outline)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "$currencySymbol${"%.2f".format(spent)}",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = Primary
+                )
+                Box(modifier = Modifier.padding(vertical = 8.dp).width(32.dp).height(1.dp).background(Color.White.copy(alpha = 0.2f)))
+                Text("LIMIT", style = MaterialTheme.typography.labelSmall, color = Outline)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = if (limit > 0) "$currencySymbol${"%.0f".format(limit)}" else "No Limit",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = OnSurfaceVariant
+                )
+            }
+        }
     }
 }
 

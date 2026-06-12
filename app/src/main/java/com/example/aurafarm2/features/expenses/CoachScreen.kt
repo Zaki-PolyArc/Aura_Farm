@@ -45,19 +45,18 @@ fun CoachScreen() {
         modifier = Modifier
             .fillMaxSize()
             .background(Background)
-            .padding(16.dp)
+            .padding(top = 48.dp, start = 24.dp, end = 24.dp, bottom = 24.dp)
     ) {
         Text(
             text = "Finance Coach",
-            style = MaterialTheme.typography.headlineMedium,
+            style = MaterialTheme.typography.headlineLarge,
             color = OnSurface,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 24.dp)
+            modifier = Modifier.padding(bottom = 32.dp)
         )
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+            verticalArrangement = Arrangement.spacedBy(32.dp)
         ) {
             item {
                 SectionHeader(
@@ -133,12 +132,11 @@ fun SectionHeader(title: String, actionText: String, onAction: () -> Unit) {
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.titleLarge,
-            color = OnSurface,
-            fontWeight = FontWeight.SemiBold
+            style = MaterialTheme.typography.titleMedium,
+            color = OnSurface
         )
         TextButton(onClick = onAction) {
-            Text(actionText, color = Primary)
+            Text(actionText, style = MaterialTheme.typography.labelLarge, color = Primary)
         }
     }
 }
@@ -162,27 +160,27 @@ fun BudgetCard(category: String, spent: Double, limit: Double, progress: Float, 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(SurfaceContainerLowest)
-            .padding(16.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(SurfaceContainerLow)
+            .padding(20.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(category, style = MaterialTheme.typography.bodyLarge, color = OnSurface, fontWeight = FontWeight.Medium)
+            Text(category, style = MaterialTheme.typography.bodyLarge, color = Primary)
             Text(
                 text = "${String.format("%.2f", spent)} / ${String.format("%.2f", limit)}",
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (isOver) com.example.aurafarm2.core.theme.Error else OnSurfaceVariant
+                color = if (isOver) Error else Outline
             )
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(16.dp))
         LinearProgressIndicator(
             progress = progress,
-            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
-            color = if (isOver) com.example.aurafarm2.core.theme.Error else Primary,
-            trackColor = SurfaceContainerHighest
+            modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(100.dp)),
+            color = if (isOver) Error else Primary,
+            trackColor = SurfaceContainerHigh
         )
     }
 }
@@ -196,26 +194,25 @@ fun RecurringCard(entry: RecurringEntry) {
         daysUntil == 1L -> "Due Tomorrow"
         else -> "Due in $daysUntil days"
     }
-    val statusColor = if (daysUntil <= 3) com.example.aurafarm2.core.theme.Error else Primary
+    val statusColor = if (daysUntil <= 3) Error else Outline
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(SurfaceContainerLowest)
-            .padding(16.dp),
+            .clip(RoundedCornerShape(12.dp))
+            .background(SurfaceContainerLow)
+            .padding(20.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column {
-            Text(entry.name, style = MaterialTheme.typography.bodyLarge, color = OnSurface, fontWeight = FontWeight.Medium)
+            Text(entry.name, style = MaterialTheme.typography.bodyLarge, color = Primary)
             Text(statusText, style = MaterialTheme.typography.bodyMedium, color = statusColor)
         }
         Text(
             text = "${if(entry.kind == "Expense") "-" else "+"}${entry.amount}",
-            style = MaterialTheme.typography.titleMedium,
-            color = if (entry.kind == "Expense") com.example.aurafarm2.core.theme.Error else Primary,
-            fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (entry.kind == "Expense") Error else Primary
         )
     }
 }

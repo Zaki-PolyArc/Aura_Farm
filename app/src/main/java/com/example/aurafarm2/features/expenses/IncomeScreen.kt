@@ -151,43 +151,6 @@ fun IncomeScreen() {
 
             Spacer(Modifier.height(36.dp))
 
-            AnimatedIncomeSection(visible, 120) {
-                Column(modifier = Modifier.padding(horizontal = 24.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Income Trend", style = MaterialTheme.typography.titleMedium, color = OnSurface)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.background(SurfaceContainerHigh, RoundedCornerShape(20.dp)).padding(4.dp)
-                        ) {
-                            listOf(7 to "7D", 30 to "30D", 0 to "ALL").forEach { (days, label) ->
-                                val isSelected = selectedTimeRange == days
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(if (isSelected) Primary else Color.Transparent)
-                                        .clickable { selectedTimeRange = days }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Text(
-                                        label,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (isSelected) OnPrimary else OnSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    TrendLineChart(data = chartData, minDate = minDate, maxDate = maxDate, currencySymbol = symbol, lineColor = Primary)
-                }
-            }
-
-            Spacer(Modifier.height(36.dp))
-
             AnimatedIncomeSection(visible, 160) { IncomeStreamsSection(visible, incomeSources, symbol) }
 
             Spacer(Modifier.height(48.dp))
@@ -532,32 +495,37 @@ private fun IncomeTopBar() {
 @Composable
 private fun IncomeHeroSection(visible: Boolean, totalIncome: Double, currencySymbol: String) {
     Column(
-        modifier            = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text      = "TOTAL INCOME",
-            style     = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp),
-            color     = OnSurfaceVariant,
-            textAlign = TextAlign.Center
+            text = "TOTAL INCOME",
+            style = MaterialTheme.typography.labelSmall,
+            color = Outline
         )
-
-        Spacer(Modifier.height(12.dp))
-
-        // Count-up
+        Spacer(Modifier.height(8.dp))
         val animVal by animateFloatAsState(
-            targetValue   = if (visible) totalIncome.toFloat() else 0f,
+            targetValue = if (visible) totalIncome.toFloat() else 0f,
             animationSpec = tween(1200, easing = FastOutSlowInEasing),
-            label         = "income_hero_count"
+            label = "income_hero_count"
         )
-        Text(
-            text      = "$currencySymbol${"%.2f".format(animVal)}",
-            style     = MaterialTheme.typography.displayLarge,
-            color     = Primary,
-            textAlign = TextAlign.Center
-        )
+        val formatted = "%.2f".format(animVal)
+        val parts = formatted.split(".")
+        val main = parts[0]
+        val fraction = if (parts.size > 1) ".${parts[1]}" else ""
+
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text = "$currencySymbol$main",
+                style = MaterialTheme.typography.displayLarge,
+                color = Primary
+            )
+            Text(
+                text = fraction,
+                style = MaterialTheme.typography.displayLarge,
+                color = Outline
+            )
+        }
     }
 }
 
@@ -840,24 +808,17 @@ private fun RecentIncomeRow(
     onDelete: (String) -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
+    val isHovered by interactionSource.collectIsPressedAsState()
     
-    val scale by animateFloatAsState(
-        targetValue   = if (isPressed) 0.97f else 1f,
-        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessHigh),
-        label         = "income_press_scale"
-    )
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = { onEdit(entry.id) }
             )
-            .padding(vertical = 14.dp),
+            .padding(vertical = 12.dp),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -868,57 +829,48 @@ private fun RecentIncomeRow(
         ) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(SurfaceContainerHigh),
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (isHovered) Color.White.copy(alpha = 0.05f) else SurfaceContainer),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Payments,
                     contentDescription = null,
-                    tint = Primary,
-                    modifier = Modifier.size(22.dp)
+                    tint = Outline,
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
             Column {
                 Text(
                     text = entry.source,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = OnSurface
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Primary
                 )
-                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "${entry.tag} • ${entry.date}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OnSurfaceVariant
+                    text = entry.date,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Outline
                 )
             }
         }
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
                 text = "+$currencySymbol${"%.2f".format(entry.amount)}",
-                style = MaterialTheme.typography.titleSmall,
-                color = OnSurface
+                style = MaterialTheme.typography.bodyMedium,
+                color = Primary
             )
-            IconButton(onClick = { onEdit(entry.id) }) {
-                Icon(
-                    imageVector = Icons.Outlined.Edit,
-                    contentDescription = "Edit income",
-                    tint = Primary,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            IconButton(onClick = { onDelete(entry.id) }) {
+            IconButton(onClick = { onDelete(entry.id) }, modifier = Modifier.size(24.dp)) {
                 Icon(
                     imageVector = Icons.Outlined.Delete,
                     contentDescription = "Delete income",
-                    tint = Error,
-                    modifier = Modifier.size(18.dp)
+                    tint = Outline.copy(alpha = 0.5f),
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }

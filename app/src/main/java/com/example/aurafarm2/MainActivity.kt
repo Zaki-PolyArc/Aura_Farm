@@ -12,6 +12,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -126,17 +127,20 @@ fun MainShell() {
     Scaffold(
         containerColor = Background,
         bottomBar = {
-            // Custom bottom bar matching the screenshot:
-            // icon-only, active tab has a sand-filled rounded square background
+            // Glassmorphic pill bottom bar
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SurfaceContainerLowest)
                     .navigationBarsPadding()
-                    .padding(horizontal = 32.dp, vertical = 12.dp)
+                    .padding(horizontal = 24.dp, vertical = 24.dp)
             ) {
                 Row(
-                    modifier              = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(50))
+                        .background(SurfaceContainerLowest.copy(alpha = 0.85f))
+                        .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(50))
+                        .padding(vertical = 8.dp, horizontal = 16.dp),
                     horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment     = Alignment.CenterVertically
                 ) {
@@ -146,10 +150,10 @@ fun MainShell() {
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(50))
                                 .background(
-                                    if (isSelected) FabBackground
-                                    else androidx.compose.ui.graphics.Color.Transparent
+                                    if (isSelected) Color.White.copy(alpha = 0.05f)
+                                    else Color.Transparent
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
@@ -157,8 +161,8 @@ fun MainShell() {
                                 Icon(
                                     imageVector        = item.icon,
                                     contentDescription = item.label,
-                                    tint = if (isSelected) FabIcon else OnSurfaceVariant,
-                                    modifier           = Modifier.size(22.dp)
+                                    tint = if (isSelected) Primary else Outline,
+                                    modifier           = Modifier.size(24.dp)
                                 )
                             }
                         }
