@@ -72,6 +72,9 @@ dependencies {
     // Splash Screen
     implementation(libs.androidx.core.splashscreen)
 
+    // Force modern Fragment to fix requestCode crash caused by biometric lib
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
+
     // Downloadable Fonts
     implementation(libs.androidx.ui.text.google.fonts)
 

@@ -78,6 +78,7 @@ fun ExpenseScreen() {
     
     var showAddSheet by remember { mutableStateOf(false) }
     var editingExpense by remember { mutableStateOf<ExpenseEntry?>(null) }
+    var selectedTimeRange by remember { mutableStateOf(30) } // 7, 30, or 0 for All Time
     var showReviewQueue by remember { mutableStateOf(false) }
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
@@ -163,6 +164,49 @@ fun ExpenseScreen() {
             }
 
             AnimatedSection(visible, 80) { ExpenseHeroSection(visible, netBalance, symbol) }
+
+            Spacer(Modifier.height(36.dp))
+
+            val chartData = expenses
+                .filter { selectedTimeRange == 0 || (LocalDate.now().toEpochDay() - it.dateEpochDay) <= selectedTimeRange }
+                .groupBy { it.dateEpochDay }
+                .map { (date, entries) -> ChartDataPoint(date, entries.sumOf { it.amount }) }
+                .sortedBy { it.dateEpochDay }
+
+            AnimatedSection(visible, 110) {
+                Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Spending Trend", style = MaterialTheme.typography.titleMedium, color = OnSurface)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.background(SurfaceContainerHigh, RoundedCornerShape(20.dp)).padding(4.dp)
+                        ) {
+                            listOf(7 to "7D", 30 to "30D", 0 to "ALL").forEach { (days, label) ->
+                                val isSelected = selectedTimeRange == days
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(if (isSelected) Primary else Color.Transparent)
+                                        .clickable { selectedTimeRange = days }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isSelected) OnPrimary else OnSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    TrendLineChart(data = chartData, currencySymbol = symbol, lineColor = Error)
+                }
+            }
 
             Spacer(Modifier.height(36.dp))
 
