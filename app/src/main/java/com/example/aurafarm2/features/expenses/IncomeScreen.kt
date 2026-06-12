@@ -225,8 +225,7 @@ fun IncomeScreen() {
                     if (current != null) {
                         updateIncomeEntry(
                             context,
-                            IncomeEntry(
-                                id = current.id,
+                            current.copy(
                                 source = source,
                                 tag = tag,
                                 amount = amount,

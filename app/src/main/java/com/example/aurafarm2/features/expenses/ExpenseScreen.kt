@@ -252,8 +252,7 @@ fun ExpenseScreen() {
                     if (current != null) {
                         updateExpenseEntry(
                             context,
-                            ExpenseEntry(
-                                id = current.id,
+                            current.copy(
                                 name = name,
                                 tag = tag,
                                 amount = amount,
