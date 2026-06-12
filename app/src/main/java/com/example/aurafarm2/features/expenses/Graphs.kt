@@ -35,6 +35,8 @@ data class ChartDataPoint(
 @Composable
 fun TrendLineChart(
     data: List<ChartDataPoint>,
+    minDate: Long,
+    maxDate: Long,
     modifier: Modifier = Modifier,
     lineColor: Color = Primary,
     currencySymbol: String = "$"
@@ -66,34 +68,46 @@ fun TrendLineChart(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(sortedData) {
+                .pointerInput(sortedData, minDate, maxDate) {
                     detectTapGestures { offset ->
-                        val itemWidth = size.width / (sortedData.size.coerceAtLeast(2) - 1).coerceAtLeast(1).toFloat()
-                        val index = (offset.x / itemWidth).toInt().coerceIn(0, sortedData.size - 1)
-                        selectedIndex = index
+                        val dateRange = (maxDate - minDate).coerceAtLeast(1L)
+                        var closestIndex = 0
+                        var minDistance = Float.MAX_VALUE
+                        sortedData.forEachIndexed { idx, point ->
+                            val x = size.width * (point.dateEpochDay - minDate).toFloat() / dateRange.toFloat()
+                            val dist = kotlin.math.abs(x - offset.x)
+                            if (dist < minDistance) {
+                                minDistance = dist
+                                closestIndex = idx
+                            }
+                        }
+                        if (minDistance < 150f) {
+                            selectedIndex = closestIndex
+                        } else {
+                            selectedIndex = null
+                        }
                     }
                 }
         ) {
             val width = size.width
-            val height = size.height
+            val height = size.height.coerceAtLeast(0.01f)
 
             val path = Path()
             val fillPath = Path()
             
             val points = mutableListOf<Offset>()
+            val dateRange = (maxDate - minDate).coerceAtLeast(1L)
             
-            if (sortedData.size == 1) {
-                points.add(Offset(width / 2f, height - (sortedData[0].amount.toFloat() / maxAmount.toFloat()) * height))
-                path.moveTo(points.first().x, points.first().y)
-                path.lineTo(points.first().x + 1, points.first().y)
-            } else {
-                val dx = width / (sortedData.size - 1)
-                sortedData.forEachIndexed { index, point ->
-                    val x = index * dx
-                    val y = height - ((point.amount / maxAmount).toFloat() * height * 0.8f) // leave 20% top padding
-                    points.add(Offset(x, y))
-                }
+            sortedData.forEach { point ->
+                val x = width * (point.dateEpochDay - minDate).toFloat() / dateRange.toFloat()
+                val y = height - ((point.amount / maxAmount).toFloat() * height * 0.8f) // leave 20% top padding
+                points.add(Offset(x, y))
+            }
 
+            if (points.size == 1) {
+                path.moveTo(0f, points.first().y)
+                path.lineTo(width, points.first().y)
+            } else {
                 path.moveTo(points.first().x, points.first().y)
                 fillPath.moveTo(points.first().x, height)
                 fillPath.lineTo(points.first().x, points.first().y)
@@ -102,9 +116,9 @@ fun TrendLineChart(
                     val p1 = points[i]
                     val p2 = points[i + 1]
                     
-                    val cx1 = p1.x + dx / 2f
+                    val cx1 = p1.x + (p2.x - p1.x) / 2f
                     val cy1 = p1.y
-                    val cx2 = p1.x + dx / 2f
+                    val cx2 = p1.x + (p2.x - p1.x) / 2f
                     val cy2 = p2.y
                     
                     path.cubicTo(cx1, cy1, cx2, cy2, p2.x, p2.y)
@@ -121,15 +135,17 @@ fun TrendLineChart(
             pathMeasure.getSegment(0f, pathMeasure.length * progress, animatedPath.asAndroidPath(), true)
 
             // Draw Fill
-            val fillGradient = Brush.verticalGradient(
-                colors = listOf(lineColor.copy(alpha = 0.3f * progress), Color.Transparent),
-                startY = 0f,
-                endY = height
-            )
-            drawPath(
-                path = fillPath,
-                brush = fillGradient
-            )
+            if (points.size > 1) {
+                val fillGradient = Brush.verticalGradient(
+                    colors = listOf(lineColor.copy(alpha = 0.3f * progress), Color.Transparent),
+                    startY = 0f,
+                    endY = height
+                )
+                drawPath(
+                    path = fillPath,
+                    brush = fillGradient
+                )
+            }
 
             // Draw Line
             drawPath(

@@ -173,6 +173,13 @@ fun ExpenseScreen() {
                 .map { (date, entries) -> ChartDataPoint(date, entries.sumOf { it.amount }) }
                 .sortedBy { it.dateEpochDay }
 
+            val maxDate = LocalDate.now().toEpochDay()
+            val minDate = if (selectedTimeRange > 0) {
+                maxDate - selectedTimeRange
+            } else {
+                chartData.minOfOrNull { it.dateEpochDay } ?: (maxDate - 30)
+            }
+
             AnimatedSection(visible, 110) {
                 Column(modifier = Modifier.padding(horizontal = 24.dp)) {
                     Row(
@@ -204,7 +211,7 @@ fun ExpenseScreen() {
                         }
                     }
                     Spacer(Modifier.height(16.dp))
-                    TrendLineChart(data = chartData, currencySymbol = symbol, lineColor = Error)
+                    TrendLineChart(data = chartData, minDate = minDate, maxDate = maxDate, currencySymbol = symbol, lineColor = Error)
                 }
             }
 

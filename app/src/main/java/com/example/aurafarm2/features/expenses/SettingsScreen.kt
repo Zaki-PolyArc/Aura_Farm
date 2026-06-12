@@ -136,7 +136,7 @@ fun SettingsScreen() {
         uri?.let {
             coroutineScope.launch {
                 val summary = CsvBackupManager.restoreFromUri(context, it)
-                restoreMessage = "Imported ${summary.importedExpenses} expenses, ${summary.importedIncome} income, ${summary.importedBudgets} budgets, ${summary.importedRecurring} recurring entries, ${summary.importedCorrections} corrections. Skipped ${summary.skippedRows} rows."
+                restoreMessage = "Imported ${summary.importedExpenses} expenses, ${summary.importedIncome} income. Skipped ${summary.skippedRows} rows."
             }
         }
     }
@@ -226,25 +226,7 @@ fun SettingsScreen() {
             }
         }
 
-        Spacer(Modifier.height(32.dp))
 
-        AnimatedSettingsSection(visible, 260) {
-            SettingsGroup(label = "FINANCE COACH") {
-                SettingsRow(
-                    label = "Budgets",
-                    value = "${budgets.size} set",
-                    onClick = { showBudgetDialog = true }
-                )
-                SettingsDivider()
-                SettingsRow(
-                    label = "Recurring Entries",
-                    value = "${recurringEntries.count { it.enabled }} active",
-                    onClick = { showRecurringDialog = true }
-                )
-            }
-        }
-
-        Spacer(Modifier.height(32.dp))
 
         AnimatedSettingsSection(visible, 270) {
             SettingsGroup(label = "BACKUP & RESTORE") {
@@ -877,7 +859,7 @@ private fun ReminderManagerDialog(
 }
 
 @Composable
-private fun BudgetManagerDialog(
+fun BudgetManagerDialog(
     budgets: List<Budget>,
     onDismiss: () -> Unit,
     onSave: (Budget) -> Unit,
@@ -995,7 +977,7 @@ private fun CategoryCorrectionDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RecurringManagerDialog(
+fun RecurringManagerDialog(
     entries: List<RecurringEntry>,
     onDismiss: () -> Unit,
     onSave: (RecurringEntry) -> Unit,

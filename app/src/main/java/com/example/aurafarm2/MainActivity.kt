@@ -33,6 +33,9 @@ import com.example.aurafarm2.features.expenses.SettingsScreen
 import com.example.aurafarm2.features.expenses.SecurityLockScreen
 import com.example.aurafarm2.features.expenses.appSettingsFlow
 
+import com.example.aurafarm2.features.expenses.CoachScreen
+import com.example.aurafarm2.features.expenses.scheduleDailyRecurringWorker
+
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -40,6 +43,7 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
         createReminderChannel()
         requestNotificationPermission()
+        scheduleDailyRecurringWorker(this)
         setContent {
             val settings = remember { appSettingsFlow(applicationContext) }.collectAsState(initial = null).value
             
@@ -109,6 +113,7 @@ private data class NavItem(
 private val navItems = listOf(
     NavItem(Icons.Outlined.AccountBalanceWallet, "Expenses"),
     NavItem(Icons.Outlined.Payments,             "Income"),
+    NavItem(Icons.Outlined.TrendingUp,           "Coach"),
     NavItem(Icons.Outlined.Settings,             "Settings"),
 )
 
@@ -171,7 +176,8 @@ fun MainShell() {
             when (selectedTab) {
                 0 -> ExpenseScreen()
                 1 -> IncomeScreen()
-                2 -> SettingsScreen()
+                2 -> CoachScreen()
+                3 -> SettingsScreen()
             }
         }
     }

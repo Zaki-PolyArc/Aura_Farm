@@ -122,6 +122,13 @@ fun IncomeScreen() {
         .map { (date, entries) -> ChartDataPoint(date, entries.sumOf { it.amount }) }
         .sortedBy { it.dateEpochDay }
 
+    val maxDate = LocalDate.now().toEpochDay()
+    val minDate = if (selectedTimeRange > 0) {
+        maxDate - selectedTimeRange
+    } else {
+        chartData.minOfOrNull { it.dateEpochDay } ?: (maxDate - 30)
+    }
+
     val dueIncomeEntries = recurringEntries
         .filter { it.enabled && it.kind == "Income" && it.nextDueEpochDay <= LocalDate.now().plusDays(7).toEpochDay() }
         .sortedBy { it.nextDueEpochDay }
@@ -175,7 +182,7 @@ fun IncomeScreen() {
                         }
                     }
                     Spacer(Modifier.height(16.dp))
-                    TrendLineChart(data = chartData, currencySymbol = symbol, lineColor = Primary)
+                    TrendLineChart(data = chartData, minDate = minDate, maxDate = maxDate, currencySymbol = symbol, lineColor = Primary)
                 }
             }
 
