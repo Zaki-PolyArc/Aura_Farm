@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -37,6 +38,8 @@ val BUDGETS_KEY = stringPreferencesKey("budgets_json")
 val RECURRING_ENTRIES_KEY = stringPreferencesKey("recurring_entries_json")
 val CATEGORY_CORRECTIONS_KEY = stringPreferencesKey("category_corrections_json")
 val PENDING_TRANSACTIONS_KEY = stringPreferencesKey("pending_transactions_json")
+val OVERALL_EXPENSE_LIMIT_KEY = doublePreferencesKey("overall_expense_limit")
+val OVERALL_INCOME_GOAL_KEY = doublePreferencesKey("overall_income_goal")
 
 // ── Models ─────────────────────────────────────────────────────
 
@@ -73,7 +76,9 @@ data class AppSettings(
     val appearance: String = "Dark",
     val hasPassword: Boolean = false,
     val biometricEnabled: Boolean = false,
-    val smartDetectionEnabled: Boolean = false
+    val smartDetectionEnabled: Boolean = false,
+    val overallExpenseLimit: Double = 0.0,
+    val overallIncomeGoal: Double = 0.0
 )
 
 data class CategoryCorrection(
@@ -143,7 +148,9 @@ fun appSettingsFlow(context: Context): Flow<AppSettings> =
             appearance = prefs[APPEARANCE_KEY] ?: "Dark",
             hasPassword = prefs[PASSWORD_HASH_KEY].isNullOrBlank().not(),
             biometricEnabled = prefs[BIOMETRIC_ENABLED_KEY] ?: false,
-            smartDetectionEnabled = prefs[SMART_DETECTION_ENABLED_KEY] ?: false
+            smartDetectionEnabled = prefs[SMART_DETECTION_ENABLED_KEY] ?: false,
+            overallExpenseLimit = prefs[OVERALL_EXPENSE_LIMIT_KEY] ?: 0.0,
+            overallIncomeGoal = prefs[OVERALL_INCOME_GOAL_KEY] ?: 0.0
         )
     }
 
@@ -199,6 +206,18 @@ suspend fun verifyPassword(context: Context, password: String): Boolean {
 suspend fun saveSmartDetectionEnabled(context: Context, enabled: Boolean) {
     context.settingsDataStore.edit { prefs ->
         prefs[SMART_DETECTION_ENABLED_KEY] = enabled
+    }
+}
+
+suspend fun saveOverallExpenseLimit(context: Context, limit: Double) {
+    context.settingsDataStore.edit { prefs ->
+        prefs[OVERALL_EXPENSE_LIMIT_KEY] = limit
+    }
+}
+
+suspend fun saveOverallIncomeGoal(context: Context, goal: Double) {
+    context.settingsDataStore.edit { prefs ->
+        prefs[OVERALL_INCOME_GOAL_KEY] = goal
     }
 }
 

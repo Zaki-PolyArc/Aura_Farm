@@ -18,6 +18,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.border
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -36,6 +38,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
+import com.example.aurafarm2.features.expenses.components.MoneyTypeNumpadModal
 
 // ── Models ─────────────────────────────────────────────────
 
@@ -81,6 +84,7 @@ fun IncomeScreen() {
     var editingIncome by remember { mutableStateOf<IncomeEntry?>(null) }
     var selectedTimeRange by remember { mutableStateOf(30) } // 7, 30, or 0 for All Time
 
+    var showGoalNumpad by remember { mutableStateOf(false) }
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
 
@@ -147,42 +151,23 @@ fun IncomeScreen() {
 
             Spacer(Modifier.height(24.dp))
 
-            AnimatedIncomeSection(visible, 80)  { IncomeHeroSection(visible, totalIncome, symbol) }
+            AnimatedIncomeSection(visible, 80)  { 
+                IncomeArcSection(
+                    visible = visible, 
+                    earned = totalIncome, 
+                    goal = settings.overallIncomeGoal, 
+                    currencySymbol = symbol,
+                    onClick = { showGoalNumpad = true }
+                ) 
+            }
 
             Spacer(Modifier.height(36.dp))
 
-            AnimatedIncomeSection(visible, 160) { IncomeStreamsSection(visible, incomeSources, symbol) }
+            AnimatedIncomeSection(visible, 160) { BreakdownSection(visible, breakdownItems, symbol) }
 
             Spacer(Modifier.height(48.dp))
 
             AnimatedIncomeSection(visible, 240) {
-                DueRecurringIncomeSection(
-                    entries = dueIncomeEntries,
-                    currencySymbol = symbol,
-                    onAddNow = { recurring ->
-                        coroutineScope.launch {
-                            saveIncomeEntry(
-                                context,
-                                IncomeEntry(
-                                    id = UUID.randomUUID().toString(),
-                                    source = recurring.name,
-                                    tag = recurring.category,
-                                    amount = recurring.amount,
-                                    dateEpochDay = LocalDate.now().toEpochDay()
-                                )
-                            )
-                            saveRecurringEntry(
-                                context,
-                                recurring.copy(nextDueEpochDay = recurring.nextRecurringDue().toEpochDay())
-                            )
-                        }
-                    }
-                )
-            }
-
-            Spacer(Modifier.height(48.dp))
-
-            AnimatedIncomeSection(visible, 320) {
                 RecentIncomeSection(
                     visible = visible,
                     entries = recentIncomeEntries,
@@ -195,20 +180,6 @@ fun IncomeScreen() {
                             deleteIncomeEntry(context, entryId)
                         }
                     }
-                )
-            }
-
-            Spacer(Modifier.height(48.dp))
-
-            AnimatedIncomeSection(visible, 400) { BreakdownSection(visible, breakdownItems, symbol) }
-
-            Spacer(Modifier.height(48.dp))
-
-            AnimatedIncomeSection(visible, 480) {
-                ReviewSection(
-                    incomes = incomes,
-                    expenses = expenses,
-                    currencySymbol = symbol
                 )
             }
 
@@ -261,6 +232,20 @@ fun IncomeScreen() {
                 }
                 showAddSheet = false
                 editingIncome = null
+            }
+        )
+    }
+
+    if (showGoalNumpad) {
+        MoneyTypeNumpadModal(
+            title = "Set Monthly Goal",
+            currencySymbol = symbol,
+            initialValue = settings.overallIncomeGoal,
+            onDismiss = { showGoalNumpad = false },
+            onConfirm = { goal ->
+                coroutineScope.launch {
+                    saveOverallIncomeGoal(context, goal)
+                }
             }
         )
     }
@@ -493,38 +478,83 @@ private fun IncomeTopBar() {
 // ── Hero ───────────────────────────────────────────────────────
 
 @Composable
-private fun IncomeHeroSection(visible: Boolean, totalIncome: Double, currencySymbol: String) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "TOTAL INCOME",
-            style = MaterialTheme.typography.labelSmall,
-            color = Outline
-        )
-        Spacer(Modifier.height(8.dp))
-        val animVal by animateFloatAsState(
-            targetValue = if (visible) totalIncome.toFloat() else 0f,
-            animationSpec = tween(1200, easing = FastOutSlowInEasing),
-            label = "income_hero_count"
-        )
-        val formatted = "%.2f".format(animVal)
-        val parts = formatted.split(".")
-        val main = parts[0]
-        val fraction = if (parts.size > 1) ".${parts[1]}" else ""
+private fun IncomeArcSection(visible: Boolean, earned: Double, goal: Double, currencySymbol: String, onClick: () -> Unit = {}) {
+    val progress = if (goal > 0) (earned / goal).coerceIn(0.0, 1.0).toFloat() else 0f
+    val animProgress by animateFloatAsState(
+        targetValue = if (visible) progress else 0f,
+        animationSpec = tween(1500, easing = FastOutSlowInEasing),
+        label = "arc_progress"
+    )
 
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = "$currencySymbol$main",
-                style = MaterialTheme.typography.displayLarge,
-                color = Primary
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
+            val radius = size.minDimension / 2 - 24.dp.toPx()
+            val outerRadius = size.minDimension / 2 - 8.dp.toPx()
+            
+            // Background Track
+            drawCircle(
+                color = Color.White.copy(alpha = 0.05f),
+                radius = radius,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
             )
-            Text(
-                text = fraction,
-                style = MaterialTheme.typography.displayLarge,
-                color = Outline
+            
+            // Dashed Indicator Track
+            drawCircle(
+                color = Color.White.copy(alpha = 0.1f),
+                radius = outerRadius,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = 1.dp.toPx(),
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 6.dp.toPx()))
+                )
             )
+            
+            // Active Progress Arc
+            drawArc(
+                color = Color.White,
+                startAngle = -90f,
+                sweepAngle = 360f * animProgress,
+                useCenter = false,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                topLeft = androidx.compose.ui.geometry.Offset(center.x - radius, center.y - radius),
+                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2)
+            )
+        }
+        
+        // Inner content
+        Box(
+            modifier = Modifier
+                .size(192.dp)
+                .shadow(elevation = 16.dp, shape = androidx.compose.foundation.shape.CircleShape, spotColor = Color.Black.copy(alpha = 0.5f))
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(Color.White.copy(alpha = 0.08f))
+                .border(1.dp, Color.White.copy(alpha = 0.15f), androidx.compose.foundation.shape.CircleShape)
+                .clickable { onClick() },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("EARNED", style = MaterialTheme.typography.labelSmall, color = Outline)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "$currencySymbol${"%.2f".format(earned)}",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = Primary
+                )
+                Box(modifier = Modifier.padding(vertical = 8.dp).width(32.dp).height(1.dp).background(Color.White.copy(alpha = 0.2f)))
+                Text("GOAL", style = MaterialTheme.typography.labelSmall, color = Outline)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = if (goal > 0) "$currencySymbol${"%.0f".format(goal)}" else "No Goal",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = OnSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -591,10 +621,11 @@ private fun IncomeStreamsSection(
 private fun IncomeStreamCard(source: IncomeSource, currencySymbol: String) {
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(SurfaceContainerLow)
-            .padding(20.dp)
+            .shadow(elevation = 16.dp, shape = RoundedCornerShape(32.dp), spotColor = Color.Black.copy(alpha = 0.5f))
+            .clip(RoundedCornerShape(32.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(32.dp))
+            .padding(24.dp)
     ) {
         Row(
             modifier              = Modifier.fillMaxWidth(),
@@ -899,9 +930,7 @@ private fun BreakdownSection(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(SurfaceContainerLow)
-                .padding(20.dp)
+                .padding(vertical = 12.dp)
         ) {
             val barProgress by animateFloatAsState(
                 targetValue   = if (visible) 1f else 0f,
@@ -912,7 +941,7 @@ private fun BreakdownSection(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(8.dp)
+                    .height(4.dp)
                     .clip(RoundedCornerShape(100.dp))
             ) {
                 Row(Modifier.fillMaxSize()) {
@@ -986,16 +1015,7 @@ private fun BreakdownSection(
                         Text(
                             text  = "$currencySymbol${"%.2f".format(item.amount)} (${item.percent}%)",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = OnSurfaceVariant
-                        )
-                    }
-
-                    if (index < items.lastIndex) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(Divider)
+                            color = Outline
                         )
                     }
                 }

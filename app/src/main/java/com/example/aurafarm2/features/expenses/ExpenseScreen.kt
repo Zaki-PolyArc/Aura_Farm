@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -39,6 +40,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
+import com.example.aurafarm2.features.expenses.components.MoneyTypeNumpadModal
 
 // ── Models ─────────────────────────────────────────────────
 
@@ -81,6 +83,7 @@ fun ExpenseScreen() {
     var editingExpense by remember { mutableStateOf<ExpenseEntry?>(null) }
     var selectedTimeRange by remember { mutableStateOf(30) } // 7, 30, or 0 for All Time
     var showReviewQueue by remember { mutableStateOf(false) }
+    var showLimitNumpad by remember { mutableStateOf(false) }
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
 
@@ -168,13 +171,13 @@ fun ExpenseScreen() {
 
             Spacer(Modifier.height(36.dp))
 
-            val totalLimit = budgets.sumOf { it.limit ?: 0.0 }
             AnimatedSection(visible, 110) {
                 ProgressArcSection(
                     spent = totalExpenses,
-                    limit = totalLimit,
+                    limit = settings.overallExpenseLimit,
                     currencySymbol = symbol,
-                    visible = visible
+                    visible = visible,
+                    onClick = { showLimitNumpad = true }
                 )
             }
 
@@ -323,6 +326,20 @@ fun ExpenseScreen() {
             onDelete = { pending ->
                 coroutineScope.launch {
                     deletePendingTransaction(context, pending.id)
+                }
+            }
+        )
+    }
+
+    if (showLimitNumpad) {
+        MoneyTypeNumpadModal(
+            title = "Set Monthly Limit",
+            currencySymbol = symbol,
+            initialValue = settings.overallExpenseLimit,
+            onDismiss = { showLimitNumpad = false },
+            onConfirm = { limit ->
+                coroutineScope.launch {
+                    saveOverallExpenseLimit(context, limit)
                 }
             }
         )
@@ -591,7 +608,7 @@ private fun ExpenseHeroSection(visible: Boolean, netBalance: Double, currencySym
 }
 
 @Composable
-fun ProgressArcSection(spent: Double, limit: Double, currencySymbol: String, visible: Boolean) {
+fun ProgressArcSection(spent: Double, limit: Double, currencySymbol: String, visible: Boolean, onClick: () -> Unit = {}) {
     val progress = if (limit > 0) (spent / limit).coerceIn(0.0, 1.0).toFloat() else 0f
     val animProgress by animateFloatAsState(
         targetValue = if (visible) progress else 0f,
@@ -644,9 +661,11 @@ fun ProgressArcSection(spent: Double, limit: Double, currencySymbol: String, vis
         Box(
             modifier = Modifier
                 .size(192.dp)
+                .shadow(elevation = 16.dp, shape = CircleShape, spotColor = Color.Black.copy(alpha = 0.5f))
                 .clip(CircleShape)
-                .background(SurfaceContainerLowest.copy(alpha = 0.6f))
-                .border(1.dp, Color.White.copy(alpha = 0.05f), CircleShape),
+                .background(Color.White.copy(alpha = 0.08f))
+                .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+                .clickable { onClick() },
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -691,9 +710,11 @@ private fun CoachSummarySection(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(SurfaceContainerLow)
-            .padding(20.dp)
+            .shadow(elevation = 16.dp, shape = RoundedCornerShape(32.dp), spotColor = Color.Black.copy(alpha = 0.5f))
+            .clip(RoundedCornerShape(32.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(32.dp))
+            .padding(24.dp)
     ) {
         Text("Finance Coach", style = MaterialTheme.typography.headlineMedium, color = OnSurface)
         Spacer(Modifier.height(14.dp))
@@ -734,14 +755,9 @@ private fun AllocationSection(
             verticalAlignment     = Alignment.CenterVertically
         ) {
             Text(
-                text  = "Allocation",
+                text  = "Allocations",
                 style = MaterialTheme.typography.headlineMedium,
                 color = OnSurface
-            )
-            Text(
-                text  = "Total Exp: $currencySymbol${"%.0f".format(totalExpenses)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = OnSurfaceVariant
             )
         }
 
@@ -782,8 +798,8 @@ private fun SegmentedAllocationBar(visible: Boolean, allocations: List<Allocatio
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .height(4.dp)
+            .clip(RoundedCornerShape(100.dp))
     ) {
         Row(modifier = Modifier.fillMaxSize()) {
             if (allocations.isEmpty()) {
@@ -823,27 +839,26 @@ private fun AllocationLegendItem(alloc: AllocationCategory, currencySymbol: Stri
         ) {
             Box(
                 modifier = Modifier
-                    .size(8.dp)
+                    .size(6.dp)
                     .background(alloc.color, CircleShape)
             )
             Text(
                 text  = alloc.label,
-                style = MaterialTheme.typography.labelMedium,
-                color = OnSurfaceVariant
+                style = MaterialTheme.typography.labelSmall,
+                color = Outline
             )
         }
         Spacer(Modifier.height(4.dp))
-        Text(
-            text  = "${alloc.percent}%",
-            style = MaterialTheme.typography.titleMedium,
-            color = OnSurface
-        )
-        alloc.limit?.let { limit ->
-            val used = if (limit > 0) ((alloc.spent / limit) * 100).toInt() else 0
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                text = "$currencySymbol${"%.0f".format(alloc.spent)} / $currencySymbol${"%.0f".format(limit)} ($used%)",
+                text  = "$currencySymbol${"%.0f".format(alloc.spent)}",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Primary
+            )
+            Text(
+                text  = "${alloc.percent}%",
                 style = MaterialTheme.typography.bodySmall,
-                color = if (alloc.spent > limit) Error else OnSurfaceVariant
+                color = Outline
             )
         }
     }
@@ -1228,9 +1243,11 @@ fun ReviewCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(SurfaceContainerLowest)
-            .padding(16.dp)
+            .shadow(elevation = 16.dp, shape = RoundedCornerShape(32.dp), spotColor = Color.Black.copy(alpha = 0.5f))
+            .clip(RoundedCornerShape(32.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(32.dp))
+            .padding(24.dp)
     ) {
         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
             Column {

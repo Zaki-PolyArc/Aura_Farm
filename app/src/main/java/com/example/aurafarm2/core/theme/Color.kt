@@ -206,22 +206,22 @@ private fun isLightTheme(): Boolean {
 
 // ── Semantic — allocation dots ─────────────────────────────────
 val EssentialDot: Color
-    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFF8A7961) else Color(0xFFD9CBB3)
+    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFF404040) else Color(0xFFFFFFFF)
 
 val LuxuryDot: Color
-    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFF5D6E61) else Color(0xFF8A9B8E)
+    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFF808080) else Color(0xFFB0B0B0)
 
 val ExtraDot: Color
-    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFF8C6969) else Color(0xFFB08D8D)
+    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFFB0B0B0) else Color(0xFF606060)
 
 val SalaryDot: Color
-    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFF8A7961) else Color(0xFFD9CBB3)
+    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFF404040) else Color(0xFFFFFFFF)
 
 val FreelanceDot: Color
-    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFF5D6E61) else Color(0xFF8A9B8E)
+    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFF808080) else Color(0xFFB0B0B0)
 
 val InvestmentDot: Color
-    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFF8C6969) else Color(0xFFB08D8D)
+    @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0xFFB0B0B0) else Color(0xFF606060)
 
 val Divider: Color
     @Composable @ReadOnlyComposable get() = if (isLightTheme()) Color(0x333C352D) else Color(0x80393840)
